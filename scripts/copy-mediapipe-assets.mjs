@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = resolve(repoRoot, 'node_modules/@mediapipe/tasks-vision/wasm');
-const target = resolve(repoRoot, 'dist/mediapipe/tasks-vision/wasm');
+const target = resolve(repoRoot, 'public/mediapipe/tasks-vision/wasm');
 
 await mkdir(target, { recursive: true });
 await cp(source, target, { recursive: true });
