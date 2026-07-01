@@ -11,6 +11,18 @@ const face = new FaceInputService();
 let current: FaceOlympicsEvent | undefined;
 let calibration: CalibrationProfile = DEFAULT_CALIBRATION;
 let last = 0;
+let calibrationTestFrame = 0;
+let lastTriggerState: Record<string, boolean> = {};
+
+const overlayPaths = [
+  { name: 'Face outline', color: '#2dd4ff', points: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10] },
+  { name: 'Left eye', color: '#7c3aed', points: [33, 160, 158, 133, 153, 144, 33] },
+  { name: 'Right eye', color: '#8b5cf6', points: [263, 387, 385, 362, 380, 373, 263] },
+  { name: 'Left pupil / iris', color: '#facc15', points: [468, 469, 470, 471, 472, 468] },
+  { name: 'Right pupil / iris', color: '#fde047', points: [473, 474, 475, 476, 477, 473] },
+  { name: 'Eyebrows', color: '#22c55e', points: [70, 63, 105, 66, 107, 336, 296, 334, 293, 300] },
+  { name: 'Mouth', color: '#fb7185', points: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61] },
+] as const;
 
 function button(label: string, onClick: () => void): HTMLButtonElement {
   const el = document.createElement('button');
@@ -44,12 +56,75 @@ async function ensureCamera(): Promise<void> {
   if (!preview) return;
   preview.textContent = 'Starting front camera…';
   const video = await face.start();
-  preview.replaceChildren(video);
+  preview.textContent = '';
+  preview.prepend(video);
+}
+
+function installCalibrationTestPage(): void {
+  const preview = document.querySelector<HTMLDivElement>('#preview');
+  const canvas = document.querySelector<HTMLCanvasElement>('#face-overlay');
+  const readout = document.querySelector<HTMLPreElement>('#readout');
+  const consoleBox = document.querySelector<HTMLPreElement>('#trigger-console');
+  if (!preview || !canvas || !readout || !consoleBox) return;
+  const context = canvas.getContext('2d');
+  if (!context) return;
+  const log = (message: string) => {
+    const stamped = `${new Date().toLocaleTimeString()} ${message}`;
+    const lines = [stamped, ...consoleBox.textContent.split('\n').filter(Boolean)].slice(0, 24);
+    consoleBox.textContent = lines.join('\n');
+  };
+  const draw = () => {
+    const input = face.getInput();
+    const frame = face.getDebugFrame();
+    const width = preview.clientWidth;
+    const height = preview.clientHeight;
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+    context.clearRect(0, 0, width, height);
+    context.lineWidth = 3;
+    context.lineJoin = 'round';
+    for (const path of overlayPaths) {
+      const available = path.points.every((index) => frame.landmarks[index]);
+      if (!available) continue;
+      context.beginPath();
+      for (const [pointIndex, landmarkIndex] of path.points.entries()) {
+        const landmark = frame.landmarks[landmarkIndex];
+        const x = landmark.x * width;
+        const y = landmark.y * height;
+        if (pointIndex === 0) context.moveTo(x, y);
+        else context.lineTo(x, y);
+      }
+      context.strokeStyle = path.color;
+      context.stroke();
+    }
+    const triggers: Record<string, boolean> = {
+      'face detected': input.facePresent,
+      'left blink': input.leftBlink,
+      'right blink': input.rightBlink,
+      'both eyes closed': input.bothEyesClosed,
+      'eyebrows raised': input.eyebrowsRaised >= calibration.thresholds.eyebrowsRaised,
+      'mouth open': input.mouthOpen >= calibration.thresholds.mouthOpen,
+      'lips pursed': input.lipsPursed,
+    };
+    for (const [name, active] of Object.entries(triggers)) {
+      if (active && !lastTriggerState[name]) log(`▶ ${name}`);
+      if (!active && lastTriggerState[name]) log(`■ ${name} ended`);
+    }
+    lastTriggerState = triggers;
+    readout.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, overlays: overlayPaths.map(({ name, color }) => ({ name, color })), blendshapes: frame.blendshapes }, null, 2);
+    calibrationTestFrame = requestAnimationFrame(draw);
+  };
+  cancelAnimationFrame(calibrationTestFrame);
+  lastTriggerState = {};
+  log('Calibration test overlay ready. Move your eyes, brows, mouth, and face.');
+  calibrationTestFrame = requestAnimationFrame(draw);
 }
 
 async function calibrate(id: string): Promise<void> {
   current = eventFactories[id]();
-  render(`<main class="screen"><h2>Calibration: ${current.title}</h2><p>Look at the camera with a comfy neutral face. Then try the face move for this event.</p><div id="preview" class="preview"></div><div id="readout"></div><div id="actions"></div></main>`);
+  render(`<main class="screen"><h2>Calibration + Face Test: ${current.title}</h2><p>Look at the camera with a comfy neutral face. Colored wire overlays show detected face parts in real time, and movement triggers appear below.</p><div id="preview" class="preview camera-test"><canvas id="face-overlay" aria-label="Detected facial feature overlay"></canvas></div><section class="legend">${overlayPaths.map((path) => `<span><i style="background:${path.color}"></i>${path.name}</span>`).join('')}</section><h3>Movement trigger console</h3><pre id="trigger-console" class="debug console"></pre><h3>Detection values</h3><pre id="readout" class="debug"></pre><div id="actions"></div></main>`);
   document.querySelector('#actions')!.append(
     button('Use Camera Calibration', async () => {
       const samples: NormalizedFaceInput[] = [];
@@ -72,6 +147,7 @@ async function calibrate(id: string): Promise<void> {
     button('Back', menu),
   );
   await ensureCamera();
+  installCalibrationTestPage();
 }
 
 function play(): void {
