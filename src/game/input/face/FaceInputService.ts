@@ -13,6 +13,11 @@ export interface FaceDebugFrame {
 
 const mediapipeAssetPath = (path: string): string => new URL(path, document.baseURI).toString();
 
+// requestVideoFrameCallback is not yet in lib.dom.d.ts
+type VideoWithRVFC = HTMLVideoElement & {
+  requestVideoFrameCallback: (cb: VideoFrameRequestCallback) => number;
+};
+
 export class FaceInputService {
   private stream?: MediaStream;
   private video = document.createElement('video');
@@ -53,20 +58,30 @@ export class FaceInputService {
     this.input = { ...this.input, ...patch };
   }
 
+  // Schedules the next detection tick in sync with new video frames where supported,
+  // falling back to RAF on browsers without requestVideoFrameCallback.
+  private scheduleTick(): void {
+    if ('requestVideoFrameCallback' in this.video) {
+      (this.video as VideoWithRVFC).requestVideoFrameCallback(() => this.tick());
+    } else {
+      requestAnimationFrame(() => this.tick());
+    }
+  }
+
   private async loadLandmarker(): Promise<void> {
     if (this.landmarker || this.isLoadingLandmarker) return;
     this.isLoadingLandmarker = true;
     this.debugFrame = { ...this.debugFrame, status: 'loading', message: 'Loading MediaPipe face tracker from local WASM assets…', updatedAt: Date.now() };
     try {
       this.landmarker = await this.createLandmarker(mediapipeAssetPath('mediapipe/tasks-vision/wasm/'));
-      this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready from local WASM assets. Looking for a face…' };
-      requestAnimationFrame(() => this.tick());
+      this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready. Looking for a face…' };
+      this.scheduleTick();
     } catch (localError) {
       this.debugFrame = { ...this.debugFrame, updatedAt: Date.now(), status: 'loading', message: `Local MediaPipe assets failed (${this.errorMessage(localError)}). Trying CDN fallback…` };
       try {
         this.landmarker = await this.createLandmarker('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
         this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready from CDN fallback. Looking for a face…' };
-        requestAnimationFrame(() => this.tick());
+        this.scheduleTick();
       } catch (cdnError) {
         this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'error', message: `Face tracker failed. Local: ${this.errorMessage(localError)}; CDN: ${this.errorMessage(cdnError)}` };
       }
@@ -75,12 +90,12 @@ export class FaceInputService {
     }
   }
 
-
   private async createLandmarker(wasmRoot: string): Promise<FaceLandmarker> {
     const fileset = await FilesetResolver.forVisionTasks(wasmRoot);
     return FaceLandmarker.createFromOptions(fileset, {
       baseOptions: {
         modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task',
+        delegate: 'GPU',
       },
       runningMode: 'VIDEO',
       numFaces: 1,
@@ -117,12 +132,12 @@ export class FaceInputService {
           rightEyebrowRaised: rightBrow,
           headRoll: 0,
         };
-        this.debugFrame = { landmarks, blendshapes, updatedAt: Date.now(), status: 'tracking', message: face ? 'Tracking face landmarks and blendshapes.' : 'Tracking face landmarks. Blendshapes are not available yet.' };
+        this.debugFrame = { landmarks, blendshapes, updatedAt: Date.now(), status: 'tracking', message: face ? 'Tracking face landmarks and blendshapes.' : 'Tracking landmarks (blendshapes not yet available).' };
       } else {
         this.input = { ...DEFAULT_INPUT, facePresent: false, confidence: 0 };
-        this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'no-face', message: 'Face tracker is running but does not see a face.' };
+        this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'no-face', message: 'Face tracker running — no face detected.' };
       }
     }
-    requestAnimationFrame(() => this.tick());
+    this.scheduleTick();
   }
 }
