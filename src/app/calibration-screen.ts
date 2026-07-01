@@ -87,7 +87,7 @@ function startOverlay(face: FaceInputService, video: HTMLVideoElement, getCalibr
     const h = preview.clientHeight;
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     ctx.clearRect(0, 0, w, h);
-    drawFaceOverlay(ctx, frame, video, w, h);
+    drawFaceOverlay(ctx, frame, input, video, w, h);
 
     const triggers: Record<string, boolean> = {
       'face detected': input.facePresent,

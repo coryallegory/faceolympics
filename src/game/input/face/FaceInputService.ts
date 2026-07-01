@@ -25,6 +25,7 @@ export class FaceInputService {
   private landmarker?: FaceLandmarker;
   private debugFrame: FaceDebugFrame = { landmarks: [], blendshapes: {}, updatedAt: 0, status: 'idle', message: 'Camera has not started.' };
   private isLoadingLandmarker = false;
+  private blinkState = { left: false, right: false };
 
   async start(): Promise<HTMLVideoElement> {
     if (this.stream) return this.video;
@@ -122,12 +123,17 @@ export class FaceInputService {
         const imgRight = score('eyeBlinkRight');
         const imgLeftBrow = Math.max(score('browOuterUpLeft'), score('browInnerUp'));
         const imgRightBrow = Math.max(score('browOuterUpRight'), score('browInnerUp'));
+        // Hysteresis: close at 0.5, re-open only once score drops below 0.25.
+        if (imgRight > 0.5) this.blinkState.left = true;
+        else if (imgRight < 0.25) this.blinkState.left = false;
+        if (imgLeft > 0.5) this.blinkState.right = true;
+        else if (imgLeft < 0.25) this.blinkState.right = false;
         this.input = {
           facePresent: true,
           confidence: face ? Math.max(...face.categories.map((item) => item.score), 0.5) : 0.75,
-          leftBlink: imgRight > 0.45,
-          rightBlink: imgLeft > 0.45,
-          bothEyesClosed: imgLeft > 0.45 && imgRight > 0.45,
+          leftBlink: this.blinkState.left,
+          rightBlink: this.blinkState.right,
+          bothEyesClosed: this.blinkState.left && this.blinkState.right,
           mouthOpen: score('jawOpen'),
           lipsPursed: score('mouthPucker') > 0.45,
           eyebrowsRaised: Math.max(imgLeftBrow, imgRightBrow),
