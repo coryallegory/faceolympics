@@ -5,14 +5,15 @@ export interface OverlayPath {
   readonly color: string;
   readonly points: readonly number[];
   readonly renderAs?: 'circle'; // points[0]=center, points[1]=edge; radius computed from distance
+  readonly hideWhen?: { blendshape: string; above: number }; // skip draw when blendshape score exceeds threshold
 }
 
 export const overlayPaths: readonly OverlayPath[] = [
   { name: 'Face outline',      color: '#2dd4ff', points: [10,338,297,332,284,251,389,356,454,323,361,288,397,365,379,378,400,377,152,148,176,149,150,136,172,58,132,93,234,127,162,21,54,103,67,109,10] },
   { name: 'Left eye',          color: '#7c3aed', points: [33,160,158,133,153,144,33] },
   { name: 'Right eye',         color: '#8b5cf6', points: [263,387,385,362,380,373,263] },
-  { name: 'Left pupil / iris', color: '#facc15', points: [468, 469], renderAs: 'circle' },
-  { name: 'Right pupil / iris',color: '#fde047', points: [473, 474], renderAs: 'circle' },
+  { name: 'Left pupil / iris', color: '#facc15', points: [468, 469], renderAs: 'circle', hideWhen: { blendshape: 'eyeBlinkLeft',  above: 0.4 } },
+  { name: 'Right pupil / iris',color: '#fde047', points: [473, 474], renderAs: 'circle', hideWhen: { blendshape: 'eyeBlinkRight', above: 0.4 } },
   { name: 'Left eyebrow',      color: '#22c55e', points: [70,63,105,66,107] },
   { name: 'Right eyebrow',     color: '#16a34a', points: [336,296,334,293,300] },
   { name: 'Mouth outer',       color: '#fb7185', points: [61,185,40,39,37,0,267,269,270,409,291,375,321,405,314,17,84,181,91,146,61] },
@@ -52,6 +53,7 @@ export function drawFaceOverlay(
 
   for (const path of overlayPaths) {
     if (!path.points.every((i) => frame.landmarks[i])) continue;
+    if (path.hideWhen && (frame.blendshapes[path.hideWhen.blendshape] ?? 0) > path.hideWhen.above) continue;
     const mapped = path.points.map((i) => toCanvas(frame.landmarks[i].x, frame.landmarks[i].y));
 
     if (path.renderAs === 'circle') {
