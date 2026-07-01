@@ -63,7 +63,7 @@ async function captureCalibration(face: FaceInputService): Promise<CalibrationPr
   return profile;
 }
 
-function startOverlay(face: FaceInputService, getCalibration: () => CalibrationProfile, setRafId: (id: number) => void): void {
+function startOverlay(face: FaceInputService, video: HTMLVideoElement, getCalibration: () => CalibrationProfile, setRafId: (id: number) => void): void {
   const preview = document.querySelector<HTMLDivElement>('#preview')!;
   const canvas = document.querySelector<HTMLCanvasElement>('#face-overlay')!;
   const readout = document.querySelector<HTMLPreElement>('#readout')!;
@@ -87,7 +87,7 @@ function startOverlay(face: FaceInputService, getCalibration: () => CalibrationP
     const h = preview.clientHeight;
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     ctx.clearRect(0, 0, w, h);
-    drawFaceOverlay(ctx, frame, w, h);
+    drawFaceOverlay(ctx, frame, video, w, h);
 
     const triggers: Record<string, boolean> = {
       'face detected': input.facePresent,
@@ -146,5 +146,5 @@ export async function mountCalibration(options: CalibrationScreenOptions, mount:
   preview.prepend(video);
 
   logMessage('Calibration overlay ready. Move eyes, brows, mouth, and face.');
-  startOverlay(face, getCalibration, setRafId);
+  startOverlay(face, video, getCalibration, setRafId);
 }
