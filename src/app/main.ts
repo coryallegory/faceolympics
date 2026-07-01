@@ -15,15 +15,42 @@ let activeAnimationFrame = 0;
 let lastTriggerState: Record<string, boolean> = {};
 
 const overlayPaths = [
-  { name: 'Face outline', color: '#2dd4ff', points: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10] },
-  { name: 'Left eye', color: '#7c3aed', points: [33, 160, 158, 133, 153, 144, 33] },
-  { name: 'Right eye', color: '#8b5cf6', points: [263, 387, 385, 362, 380, 373, 263] },
-  { name: 'Left pupil / iris', color: '#facc15', points: [468, 469, 470, 471, 472, 468] },
-  { name: 'Right pupil / iris', color: '#fde047', points: [473, 474, 475, 476, 477, 473] },
-  { name: 'Left eyebrow', color: '#22c55e', points: [70, 63, 105, 66, 107] },
-  { name: 'Right eyebrow', color: '#16a34a', points: [336, 296, 334, 293, 300] },
-  { name: 'Mouth', color: '#fb7185', points: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61] },
+  { name: 'Face outline', color: '#2dd4ff', points: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10], fallback: [[0.5, 0.13], [0.72, 0.2], [0.84, 0.42], [0.78, 0.7], [0.63, 0.86], [0.5, 0.91], [0.37, 0.86], [0.22, 0.7], [0.16, 0.42], [0.28, 0.2], [0.5, 0.13]] },
+  { name: 'Left eye', color: '#7c3aed', points: [33, 160, 158, 133, 153, 144, 33], fallback: [[0.28, 0.42], [0.34, 0.38], [0.43, 0.39], [0.48, 0.43], [0.42, 0.47], [0.33, 0.47], [0.28, 0.42]] },
+  { name: 'Right eye', color: '#8b5cf6', points: [263, 387, 385, 362, 380, 373, 263], fallback: [[0.72, 0.42], [0.66, 0.38], [0.57, 0.39], [0.52, 0.43], [0.58, 0.47], [0.67, 0.47], [0.72, 0.42]] },
+  { name: 'Left pupil / iris', color: '#facc15', points: [468, 469, 470, 471, 472, 468], fallback: [[0.38, 0.43], [0.39, 0.42], [0.4, 0.43], [0.39, 0.44], [0.38, 0.43]] },
+  { name: 'Right pupil / iris', color: '#fde047', points: [473, 474, 475, 476, 477, 473], fallback: [[0.62, 0.43], [0.61, 0.42], [0.6, 0.43], [0.61, 0.44], [0.62, 0.43]] },
+  { name: 'Left eyebrow', color: '#22c55e', points: [70, 63, 105, 66, 107], fallback: [[0.28, 0.34], [0.35, 0.31], [0.44, 0.32], [0.49, 0.36]] },
+  { name: 'Right eyebrow', color: '#16a34a', points: [336, 296, 334, 293, 300], fallback: [[0.72, 0.34], [0.65, 0.31], [0.56, 0.32], [0.51, 0.36]] },
+  { name: 'Mouth', color: '#fb7185', points: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61], fallback: [[0.35, 0.68], [0.43, 0.64], [0.5, 0.66], [0.57, 0.64], [0.65, 0.68], [0.58, 0.74], [0.5, 0.76], [0.42, 0.74], [0.35, 0.68]] },
 ] as const;
+
+type OverlayPoint = readonly [number, number];
+
+function drawOverlayPath(context: CanvasRenderingContext2D, path: (typeof overlayPaths)[number], frame: ReturnType<FaceInputService['getDebugFrame']>, width: number, height: number): 'live' | 'guide' {
+  const livePoints = path.points.every((index) => frame.landmarks[index])
+    ? path.points.map((index): OverlayPoint => [1 - frame.landmarks[index].x, frame.landmarks[index].y])
+    : undefined;
+  const points = livePoints ?? path.fallback;
+  context.beginPath();
+  for (const [pointIndex, [xRatio, yRatio]] of points.entries()) {
+    const x = xRatio * width;
+    const y = yRatio * height;
+    if (pointIndex === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  }
+  context.strokeStyle = path.color;
+  context.stroke();
+  context.shadowBlur = 0;
+  context.fillStyle = path.color;
+  for (const [xRatio, yRatio] of points) {
+    context.beginPath();
+    context.arc(xRatio * width, yRatio * height, livePoints ? 3.5 : 4.5, 0, Math.PI * 2);
+    context.fill();
+  }
+  context.shadowBlur = 5;
+  return livePoints ? 'live' : 'guide';
+}
 
 interface CalibrationScreenOptions {
   mode: 'landing-test' | 'event';
@@ -142,28 +169,7 @@ function installSharedCalibrationOverlay(): void {
     context.lineCap = 'round';
     context.shadowColor = '#001828';
     context.shadowBlur = 5;
-    for (const path of overlayPaths) {
-      if (!path.points.every((index) => frame.landmarks[index])) continue;
-      context.beginPath();
-      for (const [pointIndex, landmarkIndex] of path.points.entries()) {
-        const landmark = frame.landmarks[landmarkIndex];
-        const x = (1 - landmark.x) * width;
-        const y = landmark.y * height;
-        if (pointIndex === 0) context.moveTo(x, y);
-        else context.lineTo(x, y);
-      }
-      context.strokeStyle = path.color;
-      context.stroke();
-      context.shadowBlur = 0;
-      context.fillStyle = path.color;
-      for (const landmarkIndex of path.points) {
-        const landmark = frame.landmarks[landmarkIndex];
-        context.beginPath();
-        context.arc((1 - landmark.x) * width, landmark.y * height, 3.5, 0, Math.PI * 2);
-        context.fill();
-      }
-      context.shadowBlur = 5;
-    }
+    const overlayModes = overlayPaths.map((path) => ({ name: path.name, color: path.color, mode: drawOverlayPath(context, path, frame, width, height) }));
     const triggers: Record<string, boolean> = {
       'face detected': input.facePresent,
       'left blink': input.leftBlink,
@@ -180,7 +186,7 @@ function installSharedCalibrationOverlay(): void {
       if (!active && lastTriggerState[name]) writeCalibrationMessage(`■ ${name} ended`);
     }
     lastTriggerState = triggers;
-    readout.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, overlays: overlayPaths.map(({ name, color }) => ({ name, color })), blendshapes: frame.blendshapes }, null, 2);
+    readout.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, overlays: overlayModes, blendshapes: frame.blendshapes }, null, 2);
     activeAnimationFrame = requestAnimationFrame(draw);
   };
   activeAnimationFrame = requestAnimationFrame(draw);
