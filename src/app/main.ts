@@ -13,7 +13,8 @@ let calibration: CalibrationProfile = DEFAULT_CALIBRATION;
 let last = 0;
 let activeAnimationFrame = 0;
 let lastTriggerState: Record<string, boolean> = {};
-const calibrationBuildCode = 'CAL-VISIBLE-06';
+const calibrationBuildCode = 'CAL-TRACK-07';
+let lastTrackerStatus = '';
 
 const overlayPaths = [
   { name: 'Face outline', color: '#2dd4ff', points: [10, 338, 297, 332, 284, 251, 389, 356, 454, 323, 361, 288, 397, 365, 379, 378, 400, 377, 152, 148, 176, 149, 150, 136, 172, 58, 132, 93, 234, 127, 162, 21, 54, 103, 67, 109, 10], fallback: [[0.5, 0.13], [0.72, 0.2], [0.84, 0.42], [0.78, 0.7], [0.63, 0.86], [0.5, 0.91], [0.37, 0.86], [0.22, 0.7], [0.16, 0.42], [0.28, 0.2], [0.5, 0.13]] },
@@ -111,7 +112,7 @@ function renderCalibrationShell(options: CalibrationScreenOptions): void {
   const helper = event
     ? 'Check the shared camera overlay, then save a neutral face sample before the event starts.'
     : 'Use this landing-page screen to confirm the camera, facial feature map, movement triggers, and calibrated thresholds.';
-  render(`<main class="screen calibration"><h2>${titleText}</h2><p>${helper}</p><p class="build-code" aria-label="Calibration build code">Calibration build ${calibrationBuildCode}</p><div id="preview" class="preview camera-test"><canvas id="face-overlay" aria-label="Detected facial feature overlay"></canvas>${renderSensorGuideSvg()}</div><section class="legend">${overlayPaths.map((path) => `<span><i style="background:${path.color}"></i>${path.name}</span>`).join('')}</section><section class="panel"><h3>Movement triggers</h3><pre id="trigger-console" class="debug console"></pre></section><section class="panel"><h3>Live values + thresholds</h3><pre id="readout" class="debug"></pre></section><div id="actions"></div></main>`);
+  render(`<main class="screen calibration"><h2>${titleText}</h2><p>${helper}</p><p class="build-code" aria-label="Calibration build code">Calibration build ${calibrationBuildCode}</p><div id="preview" class="preview camera-test"><canvas id="face-overlay" aria-label="Detected facial feature overlay"></canvas>${renderSensorGuideSvg()}</div><section class="legend">${overlayPaths.map((path) => `<span><i style="background:${path.color}"></i>${path.name}</span>`).join('')}</section><section class="panel tracker"><h3>Face tracker</h3><p id="tracker-status">Starting…</p></section><section class="panel"><h3>Movement triggers</h3><pre id="trigger-console" class="debug console"></pre></section><section class="panel"><h3>Live values + thresholds</h3><pre id="readout" class="debug"></pre></section><div id="actions"></div></main>`);
 }
 
 async function showCalibrationScreen(options: CalibrationScreenOptions): Promise<void> {
@@ -160,7 +161,8 @@ function installSharedCalibrationOverlay(): void {
   const preview = document.querySelector<HTMLDivElement>('#preview');
   const canvas = document.querySelector<HTMLCanvasElement>('#face-overlay');
   const readout = document.querySelector<HTMLPreElement>('#readout');
-  if (!preview || !canvas || !readout) return;
+  const trackerStatus = document.querySelector<HTMLParagraphElement>('#tracker-status');
+  if (!preview || !canvas || !readout || !trackerStatus) return;
   const context = canvas.getContext('2d');
   if (!context) return;
   lastTriggerState = {};
@@ -168,6 +170,11 @@ function installSharedCalibrationOverlay(): void {
   const draw = () => {
     const input = face.getInput();
     const frame = face.getDebugFrame();
+    if (frame.status !== lastTrackerStatus) {
+      writeCalibrationMessage(`Face tracker: ${frame.status} - ${frame.message}`);
+      lastTrackerStatus = frame.status;
+    }
+    trackerStatus.textContent = `${frame.status.toUpperCase()}: ${frame.message}`;
     const width = preview.clientWidth;
     const height = preview.clientHeight;
     if (canvas.width !== width || canvas.height !== height) {
@@ -197,7 +204,7 @@ function installSharedCalibrationOverlay(): void {
       if (!active && lastTriggerState[name]) writeCalibrationMessage(`■ ${name} ended`);
     }
     lastTriggerState = triggers;
-    readout.textContent = JSON.stringify({ buildCode: calibrationBuildCode, input, thresholds: calibration.thresholds, overlays: overlayModes, guideLayer: 'svg fallback always visible', blendshapes: frame.blendshapes }, null, 2);
+    readout.textContent = JSON.stringify({ buildCode: calibrationBuildCode, tracker: { status: frame.status, message: frame.message, landmarkCount: frame.landmarks.length }, input, thresholds: calibration.thresholds, overlays: overlayModes, guideLayer: 'svg fallback always visible', blendshapes: frame.blendshapes }, null, 2);
     activeAnimationFrame = requestAnimationFrame(draw);
   };
   activeAnimationFrame = requestAnimationFrame(draw);

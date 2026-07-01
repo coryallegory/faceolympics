@@ -12,11 +12,11 @@ Production URL: <https://coryallegory.github.io/faceolympics/>
 
 The same workflow also runs for pull requests. Pull request builds deploy `dist` into the shared `pr/` folder on the `gh-pages` branch without cleaning the rest of the branch, so preview deploys do not touch the production root files.
 
-PR preview URL: <https://coryallegory.github.io/faceolympics/pr/?v=CAL-VISIBLE-06>
+PR preview URL: <https://coryallegory.github.io/faceolympics/pr/?v=CAL-TRACK-07>
 
 The preview folder is intentionally shared across pull requests; whichever PR deploys most recently may replace the previous preview. It is acceptable for production deploys from `main` or `master` to wipe the preview folder.
 
-Codex tasks that create a PR should finish with a cache-busted PR preview URL using the current visible calibration build code, for example `https://coryallegory.github.io/faceolympics/pr/?v=CAL-VISIBLE-06`, so reviewers can test the branch before merge without reusing a stale browser cache.
+Codex tasks that create a PR should finish with a cache-busted PR preview URL using the current visible calibration build code, for example `https://coryallegory.github.io/faceolympics/pr/?v=CAL-TRACK-07`, so reviewers can test the branch before merge without reusing a stale browser cache.
 
 
 ## Cache behavior
