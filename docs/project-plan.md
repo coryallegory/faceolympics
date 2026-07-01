@@ -7,6 +7,7 @@ Face Olympics is a portrait-first mobile browser game collection for kids ages 7
 ## POC Goals
 
 - Ship a public GitHub Pages prototype.
+- Provide a shared pull request preview URL for branch testing before merge.
 - Provide a title/menu flow and event selection.
 - Calibrate before each event.
 - Implement three starter events with shared contracts.
@@ -44,6 +45,7 @@ These events cover the core detection families needed by later games: blinks, ey
 - Create TypeScript web app scaffold.
 - Add portrait mobile layout shell.
 - Add GitHub Pages deployment workflow to `gh-pages`.
+- Deploy pull request previews to the shared `pr/` subdirectory on `gh-pages`.
 - Add title/menu/event-selection routes or states.
 - Add baseline lint/typecheck/build scripts.
 
@@ -78,6 +80,7 @@ These events cover the core detection families needed by later games: blinks, ey
 ## Acceptance Criteria for the POC
 
 - The app runs from GitHub Pages on a modern mobile browser.
+- Pull request builds publish a testable preview at `https://coryallegory.github.io/faceolympics/pr/?v=<current-calibration-build-code>`.
 - The app requests the front-facing camera and detects face presence.
 - The user can select one of three events from a menu.
 - Calibration runs before each event.
