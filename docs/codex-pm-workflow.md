@@ -32,6 +32,7 @@ Codex should:
 - Break work into small PRs with clear acceptance criteria.
 - Prefer vertical slices that produce playable progress.
 - Run relevant checks before creating a PR.
+- Include the PR preview URL, `https://coryallegory.github.io/faceolympics/pr/?v=<current-calibration-build-code>`, in each completed task response when a PR is created.
 - Request an independent subagent review for each implementation PR before merge.
 - Merge PRs without human intervention only when all automated merge gates pass.
 - Summarize risks, skipped checks, and verification gaps in every PR.
@@ -83,7 +84,8 @@ When a PR is not mergeable, Codex should fix the issues and request another suba
 2. **Add GitHub Pages deployment**
    - Add `.github/workflows/deploy.yml`.
    - Build on pushes to `main` and `master`.
-   - Deploy to `gh-pages`.
+   - Deploy production builds to the root of `gh-pages`.
+   - Deploy pull request previews to the shared `pr/` subdirectory on `gh-pages`.
    - Support manual `workflow_dispatch`.
 
 3. **Create app navigation states**
@@ -147,7 +149,7 @@ For each task, Codex should follow this loop:
 3. Define validation commands and manual checks.
 4. Implement the smallest useful change.
 5. Run checks.
-6. Create a PR with summary, testing, risks, and follow-ups.
+6. Create a PR with summary, testing, risks, follow-ups, and the PR preview URL.
 7. Call an independent review subagent to review the PR against acceptance criteria.
 8. If the subagent requests changes, fix them and request another review.
 9. Merge automatically without human intervention when the subagent approves and all merge gates pass; otherwise stop and report the blocker.
@@ -174,6 +176,7 @@ Fully automatic implementation-to-merge loops require repository permissions, br
 The intended POC automation loop is:
 
 - Codex creates each PR.
+- The Pages workflow publishes each PR to the shared preview path. Codex should provide a cache-busted URL in final responses, such as `https://coryallegory.github.io/faceolympics/pr/?v=<current-calibration-build-code>`.
 - CI validates the PR.
 - A review subagent reviews the PR.
 - Codex merges the PR when the subagent approves and all required checks pass.

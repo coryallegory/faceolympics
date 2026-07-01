@@ -72,6 +72,8 @@ export class FaceInputService {
         const score = (name: string): number => blendshapes[name] ?? 0;
         const left = score('eyeBlinkLeft');
         const right = score('eyeBlinkRight');
+        const leftBrow = Math.max(score('browOuterUpLeft'), score('browInnerUp'));
+        const rightBrow = Math.max(score('browOuterUpRight'), score('browInnerUp'));
         this.input = {
           facePresent: true,
           confidence: Math.max(...face.categories.map((item) => item.score), 0.5),
@@ -80,7 +82,9 @@ export class FaceInputService {
           bothEyesClosed: left > 0.45 && right > 0.45,
           mouthOpen: score('jawOpen'),
           lipsPursed: score('mouthPucker') > 0.45,
-          eyebrowsRaised: Math.max(score('browOuterUpLeft'), score('browOuterUpRight'), score('browInnerUp')),
+          eyebrowsRaised: Math.max(leftBrow, rightBrow),
+          leftEyebrowRaised: leftBrow,
+          rightEyebrowRaised: rightBrow,
           headRoll: 0,
         };
         this.debugFrame = { landmarks, blendshapes, updatedAt: Date.now() };
