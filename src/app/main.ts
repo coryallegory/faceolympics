@@ -20,7 +20,8 @@ const overlayPaths = [
   { name: 'Right eye', color: '#8b5cf6', points: [263, 387, 385, 362, 380, 373, 263] },
   { name: 'Left pupil / iris', color: '#facc15', points: [468, 469, 470, 471, 472, 468] },
   { name: 'Right pupil / iris', color: '#fde047', points: [473, 474, 475, 476, 477, 473] },
-  { name: 'Eyebrows', color: '#22c55e', points: [70, 63, 105, 66, 107, 336, 296, 334, 293, 300] },
+  { name: 'Left eyebrow', color: '#22c55e', points: [70, 63, 105, 66, 107] },
+  { name: 'Right eyebrow', color: '#16a34a', points: [336, 296, 334, 293, 300] },
   { name: 'Mouth', color: '#fb7185', points: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61] },
 ] as const;
 
@@ -136,20 +137,32 @@ function installSharedCalibrationOverlay(): void {
       canvas.height = height;
     }
     context.clearRect(0, 0, width, height);
-    context.lineWidth = 3;
+    context.lineWidth = 5;
     context.lineJoin = 'round';
+    context.lineCap = 'round';
+    context.shadowColor = '#001828';
+    context.shadowBlur = 5;
     for (const path of overlayPaths) {
       if (!path.points.every((index) => frame.landmarks[index])) continue;
       context.beginPath();
       for (const [pointIndex, landmarkIndex] of path.points.entries()) {
         const landmark = frame.landmarks[landmarkIndex];
-        const x = landmark.x * width;
+        const x = (1 - landmark.x) * width;
         const y = landmark.y * height;
         if (pointIndex === 0) context.moveTo(x, y);
         else context.lineTo(x, y);
       }
       context.strokeStyle = path.color;
       context.stroke();
+      context.shadowBlur = 0;
+      context.fillStyle = path.color;
+      for (const landmarkIndex of path.points) {
+        const landmark = frame.landmarks[landmarkIndex];
+        context.beginPath();
+        context.arc((1 - landmark.x) * width, landmark.y * height, 3.5, 0, Math.PI * 2);
+        context.fill();
+      }
+      context.shadowBlur = 5;
     }
     const triggers: Record<string, boolean> = {
       'face detected': input.facePresent,
@@ -157,6 +170,8 @@ function installSharedCalibrationOverlay(): void {
       'right blink': input.rightBlink,
       'both eyes closed': input.bothEyesClosed,
       'eyebrows raised': input.eyebrowsRaised >= calibration.thresholds.eyebrowsRaised,
+      'left eyebrow raised': input.leftEyebrowRaised >= calibration.thresholds.leftEyebrowRaised,
+      'right eyebrow raised': input.rightEyebrowRaised >= calibration.thresholds.rightEyebrowRaised,
       'mouth open': input.mouthOpen >= calibration.thresholds.mouthOpen,
       'lips pursed': input.lipsPursed,
     };
@@ -178,7 +193,7 @@ function play(): void {
   render(`<main class="screen play"><h2>${current.title}</h2><section class="arena" id="arena"></section><details><summary>Debug controls</summary><div id="actions"></div><pre class="debug" id="debug"></pre></details></main>`);
   document.querySelector('#actions')!.append(
     button('Blink', () => face.setDebugInput({ bothEyesClosed: true, leftBlink: true, rightBlink: true })),
-    button('Brows Up', () => face.setDebugInput({ eyebrowsRaised: 0.9, bothEyesClosed: false })),
+    button('Brows Up', () => face.setDebugInput({ eyebrowsRaised: 0.9, leftEyebrowRaised: 0.9, rightEyebrowRaised: 0.9, bothEyesClosed: false })),
     button('Mouth Open', () => face.setDebugInput({ mouthOpen: 0.9, lipsPursed: false })),
     button('Release', () => face.setDebugInput({ mouthOpen: 0, lipsPursed: true })),
     button('Pause / Exit', menu),
