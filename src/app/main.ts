@@ -35,11 +35,17 @@ function menu(): void {
   render('<main class="screen simple"><h2>Pick an Event</h2><p>Choose one short face-controlled challenge.</p><div id="events" class="cards"></div><button id="back">Back</button></main>');
   const wrap = document.querySelector('#events')!;
   for (const event of eventList) {
-    const card = button(`${event.title}\n${event.description}`, () => showCalibrationScreen({ mode: 'event', eventId: event.id }));
+    const card = button(`${event.title}\n${event.description}`, () => void startEvent(event.id));
     card.className = 'card';
     wrap.append(card);
   }
   document.querySelector('#back')!.addEventListener('click', title);
+}
+
+async function startEvent(eventId: string): Promise<void> {
+  current = eventFactories[eventId]();
+  void face.start(); // no-op if camera already running; game uses default input until ready
+  play();
 }
 
 async function showCalibrationScreen(options: CalibrationScreenOptions): Promise<void> {
@@ -89,7 +95,7 @@ function results(): void {
   const result = current.finish();
   saveResult(result);
   render(`<main class="screen"><h2>${result.title} Results</h2><div class="medal">${medalLabel(result.medal)}</div><p>${result.summary}</p><p>Score: ${result.score}</p><div id="actions"></div></main>`);
-  document.querySelector('#actions')!.append(button('Retry', () => showCalibrationScreen({ mode: 'event', eventId: result.eventId })), button('Event Select', menu));
+  document.querySelector('#actions')!.append(button('Retry', () => void startEvent(result.eventId)), button('Event Select', menu));
   current.dispose();
   current = undefined;
 }
