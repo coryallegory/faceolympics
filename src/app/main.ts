@@ -4,14 +4,14 @@ import { eventFactories, eventList } from '../game/events/registry';
 import { FaceInputService } from '../game/input/face/FaceInputService';
 import { buildCalibration } from '../game/input/calibration/calibration';
 import { medalLabel } from '../game/scoring/medals';
-import { loadResults, saveResult } from '../game/storage/scores';
+import { saveResult } from '../game/storage/scores';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const face = new FaceInputService();
 let current: FaceOlympicsEvent | undefined;
 let calibration: CalibrationProfile = DEFAULT_CALIBRATION;
 let last = 0;
-let calibrationTestFrame = 0;
+let activeAnimationFrame = 0;
 let lastTriggerState: Record<string, boolean> = {};
 
 const overlayPaths = [
@@ -24,6 +24,11 @@ const overlayPaths = [
   { name: 'Mouth', color: '#fb7185', points: [61, 185, 40, 39, 37, 0, 267, 269, 270, 409, 291, 375, 321, 405, 314, 17, 84, 181, 91, 146, 61] },
 ] as const;
 
+interface CalibrationScreenOptions {
+  mode: 'landing-test' | 'event';
+  eventId?: string;
+}
+
 function button(label: string, onClick: () => void): HTMLButtonElement {
   const el = document.createElement('button');
   el.textContent = label;
@@ -32,19 +37,20 @@ function button(label: string, onClick: () => void): HTMLButtonElement {
 }
 
 function render(html: string): void {
+  cancelAnimationFrame(activeAnimationFrame);
   app.innerHTML = html;
 }
 
 function title(): void {
   render('<main class="screen hero"><p class="eyebrow">Camera stays on your device</p><h1>Face Olympics</h1><p>Goofy mini-events controlled by your face.</p><div id="actions"></div></main>');
-  document.querySelector('#actions')!.append(button('Start Playing', menu), button('Debug / Camera Test', debug));
+  document.querySelector('#actions')!.append(button('Start Playing', menu), button('Camera Calibration', () => showCalibrationScreen({ mode: 'landing-test' })));
 }
 
 function menu(): void {
-  render('<main class="screen"><h2>Main Menu</h2><p>Pick one silly event. Cup mode and unlocks are intentionally not in this POC.</p><div id="events" class="cards"></div><button id="back">Back</button></main>');
+  render('<main class="screen simple"><h2>Pick an Event</h2><p>Choose one short face-controlled challenge.</p><div id="events" class="cards"></div><button id="back">Back</button></main>');
   const wrap = document.querySelector('#events')!;
   for (const event of eventList) {
-    const card = button(`${event.title} — ${event.description}`, () => calibrate(event.id));
+    const card = button(`${event.title}\n${event.description}`, () => showCalibrationScreen({ mode: 'event', eventId: event.id }));
     card.className = 'card';
     wrap.append(card);
   }
@@ -54,25 +60,72 @@ function menu(): void {
 async function ensureCamera(): Promise<void> {
   const preview = document.querySelector<HTMLDivElement>('#preview');
   if (!preview) return;
-  preview.textContent = 'Starting front camera…';
+  preview.dataset.status = 'Starting front camera…';
   const video = await face.start();
-  preview.textContent = '';
+  preview.dataset.status = '';
   preview.prepend(video);
 }
 
-function installCalibrationTestPage(): void {
+function renderCalibrationShell(options: CalibrationScreenOptions): void {
+  const event = options.eventId ? eventList.find((item) => item.id === options.eventId) : undefined;
+  const titleText = event ? `${event.title} Calibration` : 'Camera Calibration';
+  const helper = event
+    ? 'Check the shared camera overlay, then save a neutral face sample before the event starts.'
+    : 'Use this landing-page screen to confirm the camera, facial feature map, movement triggers, and calibrated thresholds.';
+  render(`<main class="screen calibration"><h2>${titleText}</h2><p>${helper}</p><div id="preview" class="preview camera-test"><canvas id="face-overlay" aria-label="Detected facial feature overlay"></canvas></div><section class="legend">${overlayPaths.map((path) => `<span><i style="background:${path.color}"></i>${path.name}</span>`).join('')}</section><section class="panel"><h3>Movement triggers</h3><pre id="trigger-console" class="debug console"></pre></section><section class="panel"><h3>Live values + thresholds</h3><pre id="readout" class="debug"></pre></section><div id="actions"></div></main>`);
+}
+
+async function showCalibrationScreen(options: CalibrationScreenOptions): Promise<void> {
+  if (options.eventId) current = eventFactories[options.eventId]();
+  else current = undefined;
+
+  renderCalibrationShell(options);
+  document.querySelector('#actions')!.append(
+    button(options.mode === 'event' ? 'Save Calibration + Play' : 'Save Calibration', async () => {
+      const built = await captureCalibration();
+      if (!built) return;
+      calibration = built;
+      if (options.mode === 'event') play();
+      else writeCalibrationMessage('Calibration saved. Try blinking, brows, and mouth movements to confirm the trigger console.');
+    }),
+    button(options.mode === 'event' ? 'Practice Without Camera' : 'Reset to Defaults', () => {
+      calibration = DEFAULT_CALIBRATION;
+      if (options.mode === 'event') play();
+      else writeCalibrationMessage('Default calibration restored.');
+    }),
+    button('Back', options.mode === 'event' ? menu : title),
+  );
+  await ensureCamera();
+  installSharedCalibrationOverlay();
+}
+
+async function captureCalibration(): Promise<CalibrationProfile | null> {
+  const samples: NormalizedFaceInput[] = [];
+  for (let i = 0; i < 12; i++) {
+    samples.push(face.getInput());
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  const built = buildCalibration(samples);
+  if (!built) writeCalibrationMessage('Could not see a face yet. Try again in bright light and keep your face in the oval.');
+  return built;
+}
+
+function writeCalibrationMessage(message: string): void {
+  const consoleBox = document.querySelector<HTMLPreElement>('#trigger-console');
+  if (!consoleBox) return;
+  const lines = [`${new Date().toLocaleTimeString()} ${message}`, ...consoleBox.textContent.split('\n').filter(Boolean)].slice(0, 24);
+  consoleBox.textContent = lines.join('\n');
+}
+
+function installSharedCalibrationOverlay(): void {
   const preview = document.querySelector<HTMLDivElement>('#preview');
   const canvas = document.querySelector<HTMLCanvasElement>('#face-overlay');
   const readout = document.querySelector<HTMLPreElement>('#readout');
-  const consoleBox = document.querySelector<HTMLPreElement>('#trigger-console');
-  if (!preview || !canvas || !readout || !consoleBox) return;
+  if (!preview || !canvas || !readout) return;
   const context = canvas.getContext('2d');
   if (!context) return;
-  const log = (message: string) => {
-    const stamped = `${new Date().toLocaleTimeString()} ${message}`;
-    const lines = [stamped, ...consoleBox.textContent.split('\n').filter(Boolean)].slice(0, 24);
-    consoleBox.textContent = lines.join('\n');
-  };
+  lastTriggerState = {};
+  writeCalibrationMessage('Shared calibration overlay ready. Move eyes, brows, mouth, and face.');
   const draw = () => {
     const input = face.getInput();
     const frame = face.getDebugFrame();
@@ -86,8 +139,7 @@ function installCalibrationTestPage(): void {
     context.lineWidth = 3;
     context.lineJoin = 'round';
     for (const path of overlayPaths) {
-      const available = path.points.every((index) => frame.landmarks[index]);
-      if (!available) continue;
+      if (!path.points.every((index) => frame.landmarks[index])) continue;
       context.beginPath();
       for (const [pointIndex, landmarkIndex] of path.points.entries()) {
         const landmark = frame.landmarks[landmarkIndex];
@@ -109,52 +161,21 @@ function installCalibrationTestPage(): void {
       'lips pursed': input.lipsPursed,
     };
     for (const [name, active] of Object.entries(triggers)) {
-      if (active && !lastTriggerState[name]) log(`▶ ${name}`);
-      if (!active && lastTriggerState[name]) log(`■ ${name} ended`);
+      if (active && !lastTriggerState[name]) writeCalibrationMessage(`▶ ${name}`);
+      if (!active && lastTriggerState[name]) writeCalibrationMessage(`■ ${name} ended`);
     }
     lastTriggerState = triggers;
     readout.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, overlays: overlayPaths.map(({ name, color }) => ({ name, color })), blendshapes: frame.blendshapes }, null, 2);
-    calibrationTestFrame = requestAnimationFrame(draw);
+    activeAnimationFrame = requestAnimationFrame(draw);
   };
-  cancelAnimationFrame(calibrationTestFrame);
-  lastTriggerState = {};
-  log('Calibration test overlay ready. Move your eyes, brows, mouth, and face.');
-  calibrationTestFrame = requestAnimationFrame(draw);
-}
-
-async function calibrate(id: string): Promise<void> {
-  current = eventFactories[id]();
-  render(`<main class="screen"><h2>Calibration + Face Test: ${current.title}</h2><p>Look at the camera with a comfy neutral face. Colored wire overlays show detected face parts in real time, and movement triggers appear below.</p><div id="preview" class="preview camera-test"><canvas id="face-overlay" aria-label="Detected facial feature overlay"></canvas></div><section class="legend">${overlayPaths.map((path) => `<span><i style="background:${path.color}"></i>${path.name}</span>`).join('')}</section><h3>Movement trigger console</h3><pre id="trigger-console" class="debug console"></pre><h3>Detection values</h3><pre id="readout" class="debug"></pre><div id="actions"></div></main>`);
-  document.querySelector('#actions')!.append(
-    button('Use Camera Calibration', async () => {
-      const samples: NormalizedFaceInput[] = [];
-      for (let i = 0; i < 12; i++) {
-        samples.push(face.getInput());
-        await new Promise((resolve) => setTimeout(resolve, 80));
-      }
-      const built = buildCalibration(samples);
-      if (!built) {
-        document.querySelector('#readout')!.textContent = 'Could not see a face yet. Try again in bright light.';
-        return;
-      }
-      calibration = built;
-      play();
-    }),
-    button('Practice Without Camera', () => {
-      calibration = DEFAULT_CALIBRATION;
-      play();
-    }),
-    button('Back', menu),
-  );
-  await ensureCamera();
-  installCalibrationTestPage();
+  activeAnimationFrame = requestAnimationFrame(draw);
 }
 
 function play(): void {
   if (!current) return;
   current.start(calibration);
   last = performance.now();
-  render(`<main class="screen play"><h2>${current.title}</h2><section class="arena" id="arena"></section><pre class="debug" id="debug"></pre><div id="actions"></div></main>`);
+  render(`<main class="screen play"><h2>${current.title}</h2><section class="arena" id="arena"></section><details><summary>Debug controls</summary><div id="actions"></div><pre class="debug" id="debug"></pre></details></main>`);
   document.querySelector('#actions')!.append(
     button('Blink', () => face.setDebugInput({ bothEyesClosed: true, leftBlink: true, rightBlink: true })),
     button('Brows Up', () => face.setDebugInput({ eyebrowsRaised: 0.9, bothEyesClosed: false })),
@@ -162,7 +183,7 @@ function play(): void {
     button('Release', () => face.setDebugInput({ mouthOpen: 0, lipsPursed: true })),
     button('Pause / Exit', menu),
   );
-  requestAnimationFrame(loop);
+  activeAnimationFrame = requestAnimationFrame(loop);
 }
 
 function loop(now: number): void {
@@ -175,7 +196,7 @@ function loop(now: number): void {
   document.querySelector('#arena')!.innerHTML = `<div class="mascot">${mascot}</div><strong>${frame.feedback}</strong><p>Score: ${frame.score}</p>`;
   document.querySelector('#debug')!.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, state: frame.state }, null, 2);
   if (frame.finished) results();
-  else requestAnimationFrame(loop);
+  else activeAnimationFrame = requestAnimationFrame(loop);
 }
 
 function results(): void {
@@ -183,19 +204,9 @@ function results(): void {
   const result = current.finish();
   saveResult(result);
   render(`<main class="screen"><h2>${result.title} Results</h2><div class="medal">${medalLabel(result.medal)}</div><p>${result.summary}</p><p>Score: ${result.score}</p><div id="actions"></div></main>`);
-  document.querySelector('#actions')!.append(button('Retry', () => calibrate(result.eventId)), button('Event Select', menu));
+  document.querySelector('#actions')!.append(button('Retry', () => showCalibrationScreen({ mode: 'event', eventId: result.eventId })), button('Event Select', menu));
   current.dispose();
   current = undefined;
-}
-
-function debug(): void {
-  render('<main class="screen"><h2>Settings / Debug</h2><div id="preview" class="preview"></div><pre id="readout" class="debug"></pre><div id="actions"></div></main>');
-  document.querySelector('#actions')!.append(button('Back', title));
-  ensureCamera();
-  setInterval(() => {
-    const readout = document.querySelector('#readout');
-    if (readout) readout.textContent = JSON.stringify({ input: face.getInput(), calibration, scores: loadResults() }, null, 2);
-  }, 250);
 }
 
 title();
