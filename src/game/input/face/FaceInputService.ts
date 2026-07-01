@@ -115,21 +115,24 @@ export class FaceInputService {
       if (landmarks.length > 0) {
         const blendshapes = face ? Object.fromEntries(face.categories.map((item) => [item.categoryName, item.score])) : {};
         const score = (name: string): number => blendshapes[name] ?? 0;
-        const left = score('eyeBlinkLeft');
-        const right = score('eyeBlinkRight');
-        const leftBrow = Math.max(score('browOuterUpLeft'), score('browInnerUp'));
-        const rightBrow = Math.max(score('browOuterUpRight'), score('browInnerUp'));
+        // MediaPipe blendshape names use camera-image perspective where "left" = left of the
+        // raw (unmirrored) image, which is the subject's physical right side. Swap here so
+        // leftBlink/rightBlink match the subject's actual anatomy.
+        const imgLeft = score('eyeBlinkLeft');
+        const imgRight = score('eyeBlinkRight');
+        const imgLeftBrow = Math.max(score('browOuterUpLeft'), score('browInnerUp'));
+        const imgRightBrow = Math.max(score('browOuterUpRight'), score('browInnerUp'));
         this.input = {
           facePresent: true,
           confidence: face ? Math.max(...face.categories.map((item) => item.score), 0.5) : 0.75,
-          leftBlink: left > 0.45,
-          rightBlink: right > 0.45,
-          bothEyesClosed: left > 0.45 && right > 0.45,
+          leftBlink: imgRight > 0.45,
+          rightBlink: imgLeft > 0.45,
+          bothEyesClosed: imgLeft > 0.45 && imgRight > 0.45,
           mouthOpen: score('jawOpen'),
           lipsPursed: score('mouthPucker') > 0.45,
-          eyebrowsRaised: Math.max(leftBrow, rightBrow),
-          leftEyebrowRaised: leftBrow,
-          rightEyebrowRaised: rightBrow,
+          eyebrowsRaised: Math.max(imgLeftBrow, imgRightBrow),
+          leftEyebrowRaised: imgRightBrow,
+          rightEyebrowRaised: imgLeftBrow,
           headRoll: 0,
         };
         this.debugFrame = { landmarks, blendshapes, updatedAt: Date.now(), status: 'tracking', message: face ? 'Tracking face landmarks and blendshapes.' : 'Tracking landmarks (blendshapes not yet available).' };
