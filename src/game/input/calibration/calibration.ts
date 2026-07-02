@@ -12,9 +12,9 @@ export function buildCalibration(samples: NormalizedFaceInput[]): CalibrationPro
     neutral: { mouthOpen: mouth, eyebrowsRaised: brow, leftEyebrowRaised: leftBrow, rightEyebrowRaised: rightBrow },
     thresholds: {
       blinkClosed: 0.55,
-      eyebrowsRaised: Math.min(0.85, brow + 0.3),
-      leftEyebrowRaised: Math.min(0.85, leftBrow + 0.3),
-      rightEyebrowRaised: Math.min(0.85, rightBrow + 0.3),
+      eyebrowsRaised: Math.min(0.75, Math.max(0.35, brow + 0.18)),
+      leftEyebrowRaised: Math.min(0.75, Math.max(0.35, leftBrow + 0.18)),
+      rightEyebrowRaised: Math.min(0.75, Math.max(0.35, rightBrow + 0.18)),
       mouthOpen: Math.min(0.85, mouth + 0.35),
       lipsPursed: 0.55,
     },
