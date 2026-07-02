@@ -5,6 +5,7 @@ import { FaceInputService } from '../game/input/face/FaceInputService';
 import { medalLabel } from '../game/scoring/medals';
 import { saveResult } from '../game/storage/scores';
 import { buildCalibrationHtml, mountCalibration, type CalibrationScreenOptions } from './calibration-screen';
+import { drawFaceOverlay } from './face-overlay';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const face = new FaceInputService();
@@ -66,7 +67,8 @@ function play(): void {
   if (!current) return;
   current.start(calibration);
   last = performance.now();
-  render(`<main class="screen play"><h2>${current.title}</h2><section class="arena" id="arena"></section><details><summary>Debug controls</summary><div id="actions"></div><pre class="debug" id="debug"></pre></details></main>`);
+  render(`<main class="screen play"><h2>${current.title}</h2><section class="arena" id="arena"></section><details><summary>Debug controls</summary><div id="actions"></div><pre class="debug" id="debug"></pre></details><div class="pip" id="pip"><canvas id="pip-canvas"></canvas></div></main>`);
+  document.querySelector<HTMLDivElement>('#pip')!.prepend(face.getVideo());
   document.querySelector('#actions')!.append(
     button('Blink', () => face.setDebugInput({ bothEyesClosed: true, leftBlink: true, rightBlink: true })),
     button('Brows Up', () => face.setDebugInput({ eyebrowsRaised: 0.9, leftEyebrowRaised: 0.9, rightEyebrowRaised: 0.9, bothEyesClosed: false })),
@@ -86,6 +88,14 @@ function loop(now: number): void {
   const mascot = current.id === 'dragon-blast' ? '🐉' : current.id === 'face-weightlifting' ? '🏋️' : '👀';
   document.querySelector('#arena')!.innerHTML = `<div class="mascot">${mascot}</div><strong>${frame.feedback}</strong><p>Score: ${frame.score}</p>`;
   document.querySelector('#debug')!.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, state: frame.state }, null, 2);
+  const pipCanvas = document.querySelector<HTMLCanvasElement>('#pip-canvas');
+  const pip = document.querySelector<HTMLDivElement>('#pip');
+  if (pipCanvas && pip) {
+    const w = pip.clientWidth, h = pip.clientHeight;
+    if (pipCanvas.width !== w || pipCanvas.height !== h) { pipCanvas.width = w; pipCanvas.height = h; }
+    const ctx = pipCanvas.getContext('2d');
+    if (ctx) { ctx.clearRect(0, 0, w, h); drawFaceOverlay(ctx, face.getDebugFrame(), input, face.getVideo(), w, h); }
+  }
   if (frame.finished) results();
   else activeAnimationFrame = requestAnimationFrame(loop);
 }

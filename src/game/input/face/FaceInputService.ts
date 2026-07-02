@@ -41,13 +41,9 @@ export class FaceInputService {
     return this.video;
   }
 
-  getInput(): NormalizedFaceInput {
-    return this.input;
-  }
-
-  getDebugFrame(): FaceDebugFrame {
-    return this.debugFrame;
-  }
+  getVideo(): HTMLVideoElement { return this.video; }
+  getInput(): NormalizedFaceInput { return this.input; }
+  getDebugFrame(): FaceDebugFrame { return this.debugFrame; }
 
   stop(): void {
     this.stream?.getTracks().forEach((track) => track.stop());
