@@ -1,5 +1,6 @@
 import { FaceLandmarker, FilesetResolver, type NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { DEFAULT_INPUT, type NormalizedFaceInput } from '../../core/types';
+import { combineBrowSignals, estimateBrowLiftFromLandmarks } from './brow-metrics';
 
 export type FaceTrackerStatus = 'idle' | 'loading' | 'ready' | 'tracking' | 'no-face' | 'error';
 
@@ -121,8 +122,9 @@ export class FaceInputService {
         // leftBlink/rightBlink match the subject's actual anatomy.
         const imgLeft = score('eyeBlinkLeft');
         const imgRight = score('eyeBlinkRight');
-        const imgLeftBrow = Math.max(score('browOuterUpLeft'), score('browInnerUp'));
-        const imgRightBrow = Math.max(score('browOuterUpRight'), score('browInnerUp'));
+        const geometryBrow = estimateBrowLiftFromLandmarks(landmarks);
+        const imgLeftBrow = combineBrowSignals(Math.max(score('browOuterUpLeft'), score('browInnerUp')), geometryBrow.left);
+        const imgRightBrow = combineBrowSignals(Math.max(score('browOuterUpRight'), score('browInnerUp')), geometryBrow.right);
         // Hysteresis: close at 0.5, re-open only once score drops below 0.25.
         if (imgRight > 0.5) this.blinkState.left = true;
         else if (imgRight < 0.25) this.blinkState.left = false;
