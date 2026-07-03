@@ -73,15 +73,17 @@ describe('loadResults', () => {
   it('filters out malformed stored entries', () => {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify([
-        validResult,
-        null,
-        { score: 10 },
-        { eventId: 'dragon-blast', score: '1000' },
-        { eventId: 42, score: 500 },
-        { eventId: 'face-weightlifting', score: 800 },
-        { eventId: 'nan-score', score: Number.NaN },
-      ]),
+      `[${
+        [
+          JSON.stringify(validResult),
+          'null',
+          JSON.stringify({ score: 10 }),
+          JSON.stringify({ eventId: 'dragon-blast', score: '1000' }),
+          JSON.stringify({ eventId: 42, score: 500 }),
+          JSON.stringify({ eventId: 'face-weightlifting', score: 800 }),
+          '{"eventId":"too-big","score":1e309}',
+        ].join(',')
+      }]`,
     );
 
     expect(loadResults()).toEqual([
