@@ -41,6 +41,12 @@ their listed dependencies have merged.
   else consumes it read-only.
 - Camera/MediaPipe behavior cannot run in unit tests. Correctness for input code is established
   by testing the pure modules (mapper, trigger engine, adaptive tracker). Do not mock MediaPipe.
+- Before writing a `needs-human-check` task's manual verification steps, confirm the screen is
+  actually reachable via current navigation (check `main.ts`'s wiring, not just that the file
+  exists) — A5 (#58) wrote steps for "Menu → Camera Check" before B2 had wired that menu entry
+  in, which produced a false-negative manual-test result (issue #17) that took real
+  investigation to root-cause. If the screen isn't reachable yet, say so in the task/PR instead
+  of writing steps around it.
 
 ## Execution & validation protocol
 
@@ -529,6 +535,39 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
   `signals.confidence` from the landmarker's actual detection presence (or a fixed value with a
   TODO) rather than reproducing that bug. This is a checklist item for A1's reviewer, not a
   separate PR.
+
+### F4 (P1). Preview folders on gh-pages get deleted by every production deploy
+
+- **Files:** `.github/workflows/deploy.yml`.
+- **Problem:** the "Deploy production site" step doesn't set `clean-exclude`, so its default
+  `clean: true` deletes anything on `gh-pages` not in the new `dist/` — including every
+  `pr/<n>/` folder E2 creates. Confirmed: the D1 merge deleted `pr/53`, `pr/56`, and `pr/58`
+  in one commit, which turned a correct fix (A5, PR #58) into an apparent manual-test
+  failure (issue #17) because the preview a reviewer needed had already been wiped by an
+  unrelated merge.
+- **Change:** add `clean-exclude: pr` to the production deploy step. Per-PR previews are
+  unaffected (already `clean: false`).
+- **Depends:** none. **Verify:** a `pr/<n>/` folder from a still-open PR survives a
+  subsequent merge to main.
+
+### F5 (P1). `calibration-screen.ts` has no camera-start error handling
+
+- **Files:** `src/app/calibration-screen.ts` (`mountCalibration`), `src/app/main.ts`
+  (wiring only).
+- **Problem:** A5 (#58) fixed the unhandled-`getUserMedia`-rejection bug in
+  `camera-check.ts`, but `calibration-screen.ts`'s `mountCalibration` has the identical gap
+  and was out of A5's file ownership. It's reachable directly from the title screen's
+  "Camera Calibration" button — the more likely thing a tester clicks first — which is what
+  caused the false-negative manual-test report on A5/#58 (see #17).
+- **Change:** mirror A5/camera-check.ts's fix — try/catch around `face.start()`, read
+  `getDebugFrame().message`, show a Retry action, guard against writing to a torn-down
+  screen if the user navigates away mid-await.
+- **Depends:** none. **Note for future cleanup:** per Decisions-already-made #2 ("no
+  calibration wizard") and B1's original intent to delete this file once nothing imports
+  it — once B2/D4 land and make this screen fully redundant, prefer deleting the title
+  screen's "Camera Calibration" entry and this file over maintaining it further.
+- **Verify:** deny camera permission via Title → Camera Calibration; screen shows the
+  friendly error + Retry instead of hanging.
 
 ---
 
