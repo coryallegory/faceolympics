@@ -1,8 +1,10 @@
-import type {
-  CalibrationProfile,
-  EventFrameResult,
-  FaceOlympicsEvent,
-  NormalizedFaceInput,
+import {
+  DEFAULT_CALIBRATION,
+  DEFAULT_THRESHOLDS,
+  type EventFrameResult,
+  type EventInput,
+  type FaceOlympicsEvent,
+  type NormalizedFaceInput,
 } from '../../game/core/types';
 import type { FaceInputService } from '../../game/input/face/FaceInputService';
 import { drawFaceOverlay } from '../face-overlay';
@@ -11,7 +13,6 @@ import { button } from '../ui';
 
 export interface PlayScreenOptions {
   event: FaceOlympicsEvent;
-  calibration: CalibrationProfile;
   face: FaceInputService;
   onExit: () => void;
   onFinish: (event: FaceOlympicsEvent) => void;
@@ -26,11 +27,41 @@ export function clampFrameDelta(rawDelta: number): number {
   return Math.min(rawDelta, MAX_FRAME_DELTA_MS);
 }
 
+// Temporary bridge until D1 migrates the event classes to EventInput/triggers directly.
+// The three FaceOlympicsEvent implementations (src/game/events/**) still implement the
+// pre-A4 interface — start(calibration: CalibrationProfile), update(deltaMs,
+// NormalizedFaceInput) — because that interface lives in src/game/core/types.ts, which
+// this task is explicitly not allowed to touch (deprecated members are removed in a later
+// coordinated PR once B2 and D1 have landed). This adapts FaceInputService's new
+// EventInput into the legacy shape so gameplay keeps working across the transition.
+// Mapping mirrors P0.1's own migration note: bothEyesClosed -> triggers.bothEyesClosed,
+// mouthOpen number -> signals.mouthOpen, eyebrowsRaised -> max(browRaiseLeft,
+// browRaiseRight), lipsPursed -> triggers.lipsPursed. Remove this once D1 lands.
+function toLegacyInput({ signals, triggers }: EventInput): NormalizedFaceInput {
+  return {
+    facePresent: signals.facePresent,
+    confidence: signals.confidence,
+    bothEyesClosed: triggers.bothEyesClosed,
+    leftBlink: triggers.blinkLeft,
+    rightBlink: triggers.blinkRight,
+    mouthOpen: signals.mouthOpen,
+    lipsPursed: triggers.lipsPursed,
+    eyebrowsRaised: Math.max(signals.browRaiseLeft, signals.browRaiseRight),
+    leftEyebrowRaised: signals.browRaiseLeft,
+    rightEyebrowRaised: signals.browRaiseRight,
+    headRoll: 0,
+  };
+}
+
 export function showPlayScreen(options: PlayScreenOptions): Screen {
   return (ctx) => {
-    const { event, calibration, face, onExit, onFinish } = options;
+    const { event, face, onExit, onFinish } = options;
 
-    event.start(calibration);
+    // DEFAULT_CALIBRATION is the same bridge as toLegacyInput above: events still require
+    // a CalibrationProfile argument to start() until D1 lands. There is no more
+    // calibration wizard (Decision #2 in the backlog) so a fixed default is correct here,
+    // not a regression.
+    event.start(DEFAULT_CALIBRATION);
 
     let last = performance.now();
 
@@ -54,19 +85,15 @@ export function showPlayScreen(options: PlayScreenOptions): Screen {
 
     pip.prepend(face.getVideo());
     actions.append(
-      button('Blink', () => face.setDebugInput({
-        bothEyesClosed: true,
-        leftBlink: true,
-        rightBlink: true,
-      })),
+      button('Blink', () => face.setDebugInput({ eyeOpenLeft: 0, eyeOpenRight: 0 })),
       button('Brows Up', () => face.setDebugInput({
-        eyebrowsRaised: 0.9,
-        leftEyebrowRaised: 0.9,
-        rightEyebrowRaised: 0.9,
-        bothEyesClosed: false,
+        browRaiseLeft: 1,
+        browRaiseRight: 1,
+        eyeOpenLeft: 1,
+        eyeOpenRight: 1,
       })),
-      button('Mouth Open', () => face.setDebugInput({ mouthOpen: 0.9, lipsPursed: false })),
-      button('Release', () => face.setDebugInput({ mouthOpen: 0, lipsPursed: true })),
+      button('Mouth Open', () => face.setDebugInput({ mouthOpen: 0.9, lipPucker: 0 })),
+      button('Release', () => face.setDebugInput({ mouthOpen: 0, lipPucker: 1 })),
       button('Pause / Exit', () => {
         event.pause();
         onExit();
@@ -80,12 +107,12 @@ export function showPlayScreen(options: PlayScreenOptions): Screen {
       last = now;
       const delta = clampFrameDelta(rawDelta);
 
-      const input = face.getInput();
-      const frame = event.update(delta, input);
+      const eventInput = face.getEventInput();
+      const frame = event.update(delta, toLegacyInput(eventInput));
 
       updateArena(mascot, feedback, score, mascotLabel, frame);
-      updateDebug(details, debug, input, calibration, frame);
-      updateOverlay(face, input, pip, pipCanvas);
+      updateDebug(details, debug, eventInput, frame);
+      updateOverlay(face, eventInput, pip, pipCanvas);
 
       if (frame.finished) {
         onFinish(event);
@@ -126,8 +153,7 @@ function updateArena(
 function updateDebug(
   details: HTMLDetailsElement,
   debug: HTMLPreElement,
-  input: NormalizedFaceInput,
-  calibration: CalibrationProfile,
+  eventInput: EventInput,
   frame: EventFrameResult,
 ): void {
   if (!details.open) {
@@ -136,8 +162,9 @@ function updateDebug(
 
   debug.textContent = JSON.stringify(
     {
-      input,
-      thresholds: calibration.thresholds,
+      signals: eventInput.signals,
+      triggers: eventInput.triggers,
+      thresholds: DEFAULT_THRESHOLDS,
       state: frame.state,
     },
     null,
@@ -147,7 +174,7 @@ function updateDebug(
 
 function updateOverlay(
   face: FaceInputService,
-  input: NormalizedFaceInput,
+  eventInput: EventInput,
   pip: HTMLDivElement,
   pipCanvas: HTMLCanvasElement,
 ): void {
@@ -169,7 +196,7 @@ function updateOverlay(
   drawFaceOverlay(
     overlay,
     face.getDebugFrame(),
-    input,
+    eventInput.triggers,
     face.getVideo(),
     width,
     height,

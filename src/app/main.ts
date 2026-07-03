@@ -9,11 +9,8 @@ import {
 } from './calibration-screen';
 import {
   clearCurrentEvent,
-  getCalibration,
   getCurrentEvent,
   getFaceService,
-  resetCalibration,
-  setCalibration,
   setCurrentEvent,
 } from './app-state';
 import { createNavigation, type Screen } from './navigation';
@@ -56,9 +53,6 @@ function calibrationScreen(options: CalibrationScreenOptions): Screen {
 
     await mountCalibration(options, {
       face: getFaceService(),
-      getCalibration,
-      setCalibration,
-      onReset: resetCalibration,
       setRafId: ctx.setAnimationFrame,
       onPlay: () => {
         void startCurrentEvent();
@@ -96,7 +90,6 @@ async function startEventInstance(event: FaceOlympicsEvent): Promise<void> {
 function goToPlay(event: FaceOlympicsEvent): void {
   navigation.goTo(showPlayScreen({
     event,
-    calibration: getCalibration(),
     face: getFaceService(),
     onExit: () => {
       clearCurrentEvent();

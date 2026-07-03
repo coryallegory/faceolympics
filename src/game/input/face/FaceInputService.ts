@@ -1,6 +1,15 @@
 import { FaceLandmarker, FilesetResolver, type NormalizedLandmark } from '@mediapipe/tasks-vision';
-import { DEFAULT_INPUT, type NormalizedFaceInput } from '../../core/types';
+import {
+  DEFAULT_EVENT_INPUT,
+  DEFAULT_SIGNALS,
+  DEFAULT_THRESHOLDS,
+  DEFAULT_TRIGGERS,
+  type EventInput,
+  type FaceSignals,
+} from '../../core/types';
+import { AdaptiveRange } from './adaptive-range';
 import { mapToSignals } from './signal-mapper';
+import { TriggerEngine } from './trigger-engine';
 
 export type FaceTrackerStatus = 'idle' | 'loading' | 'ready' | 'tracking' | 'no-face' | 'error';
 
@@ -23,14 +32,30 @@ type VideoWithRVFC = HTMLVideoElement & {
   requestVideoFrameCallback: (cb: VideoFrameRequestCallback) => number;
 };
 
+// Adaptive normalization for a *signed* channel (gaze): track the adaptive range on the
+// unsigned magnitude so a neutral reading always stays at 0 (cold start returns the raw
+// magnitude unchanged per AdaptiveRange's guardrail, so sign*rawMagnitude === raw), while a
+// warmed-up range rescales the extremes toward +/-1 without losing which direction is which.
+function normalizeSigned(range: AdaptiveRange, raw: number, deltaMs: number): number {
+  const sign = Math.sign(raw);
+  const magnitude = Math.abs(raw);
+  return sign * range.normalize(magnitude, deltaMs);
+}
+
 export class FaceInputService {
   private stream?: MediaStream;
   private video = document.createElement('video');
-  private input: NormalizedFaceInput = { ...DEFAULT_INPUT, facePresent: false };
+  private eventInput: EventInput = DEFAULT_EVENT_INPUT;
   private landmarker?: FaceLandmarker;
   private debugFrame: FaceDebugFrame = { landmarks: [], blendshapes: {}, updatedAt: 0, status: 'idle', message: 'Camera has not started.' };
   private isLoadingLandmarker = false;
-  private blinkState = { left: false, right: false };
+  private lastTickAt = 0;
+
+  private readonly triggerEngine = new TriggerEngine(DEFAULT_THRESHOLDS);
+  private readonly adaptiveBrowLeft = new AdaptiveRange();
+  private readonly adaptiveBrowRight = new AdaptiveRange();
+  private readonly adaptiveGazeX = new AdaptiveRange();
+  private readonly adaptiveGazeY = new AdaptiveRange();
 
   async start(): Promise<HTMLVideoElement> {
     if (this.stream) return this.video;
@@ -39,25 +64,35 @@ export class FaceInputService {
     this.video.muted = true;
     this.video.playsInline = true;
     await this.video.play();
-    this.input = { ...DEFAULT_INPUT, facePresent: true, confidence: 0.6 };
+    this.lastTickAt = performance.now();
+    const signals: FaceSignals = { ...DEFAULT_SIGNALS, facePresent: true, confidence: 0.6 };
+    this.eventInput = { signals, triggers: DEFAULT_TRIGGERS };
     this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'loading', message: 'Camera started. Loading MediaPipe face tracker…' };
     void this.loadLandmarker();
     return this.video;
   }
 
   getVideo(): HTMLVideoElement { return this.video; }
-  getInput(): NormalizedFaceInput { return this.input; }
+  getEventInput(): EventInput { return this.eventInput; }
+  getSignals(): FaceSignals { return this.eventInput.signals; }
   getDebugFrame(): FaceDebugFrame { return this.debugFrame; }
 
   stop(): void {
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = undefined;
-    this.input = { ...DEFAULT_INPUT, facePresent: false, confidence: 0 };
+    const signals: FaceSignals = { ...DEFAULT_SIGNALS, facePresent: false, confidence: 0 };
+    this.eventInput = { signals, triggers: DEFAULT_TRIGGERS };
     this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'idle', message: 'Camera stopped.' };
   }
 
-  setDebugInput(patch: Partial<NormalizedFaceInput>): void {
-    this.input = { ...this.input, ...patch };
+  // Manual overrides for QA without a live camera. Patches the current (already
+  // adaptive-normalized) signals and re-runs the trigger engine so dependent triggers
+  // (e.g. forcing eyeOpenLeft/Right down fires blinkLeft/Right + bothEyesClosed) react
+  // immediately. A subsequent real tick() fully overwrites this on its next frame.
+  setDebugInput(patch: Partial<FaceSignals>): void {
+    const signals: FaceSignals = { ...this.eventInput.signals, ...patch };
+    const triggers = this.triggerEngine.update(signals);
+    this.eventInput = { signals, triggers };
   }
 
   // Schedules the next detection tick in sync with new video frames where supported,
@@ -114,34 +149,33 @@ export class FaceInputService {
   }
 
   private tick(): void {
+    const now = performance.now();
+    const deltaMs = this.lastTickAt ? now - this.lastTickAt : 0;
+    this.lastTickAt = now;
+
     if (this.landmarker && this.video.readyState >= 2) {
-      const result = this.landmarker.detectForVideo(this.video, performance.now());
+      const result = this.landmarker.detectForVideo(this.video, now);
       const face = result.faceBlendshapes[0];
       const landmarks = result.faceLandmarks[0] ?? [];
       if (landmarks.length > 0) {
         const blendshapes = face ? Object.fromEntries(face.categories.map((item) => [item.categoryName, item.score])) : {};
-        const signals = mapToSignals(blendshapes, landmarks);
-        // Hysteresis: close at 0.5, re-open only once score drops below 0.25.
-        if (signals.eyeOpenLeft < 0.5) this.blinkState.left = true;
-        else if (signals.eyeOpenLeft > 0.75) this.blinkState.left = false;
-        if (signals.eyeOpenRight < 0.5) this.blinkState.right = true;
-        else if (signals.eyeOpenRight > 0.75) this.blinkState.right = false;
-        this.input = {
-          facePresent: signals.facePresent,
-          confidence: signals.confidence,
-          leftBlink: this.blinkState.left,
-          rightBlink: this.blinkState.right,
-          bothEyesClosed: this.blinkState.left && this.blinkState.right,
-          mouthOpen: signals.mouthOpen,
-          lipsPursed: signals.lipPucker > 0.45,
-          eyebrowsRaised: Math.max(signals.browRaiseLeft, signals.browRaiseRight),
-          leftEyebrowRaised: signals.browRaiseLeft,
-          rightEyebrowRaised: signals.browRaiseRight,
-          headRoll: 0,
+        const rawSignals = mapToSignals(blendshapes, landmarks);
+        // Brow: adaptive range over the raw 0-1 raise amount (neutral -> low, full raise -> high).
+        // Gaze: adaptive range over magnitude only, sign preserved, so a neutral gaze stays at 0.
+        const signals: FaceSignals = {
+          ...rawSignals,
+          browRaiseLeft: this.adaptiveBrowLeft.normalize(rawSignals.browRaiseLeft, deltaMs),
+          browRaiseRight: this.adaptiveBrowRight.normalize(rawSignals.browRaiseRight, deltaMs),
+          gazeX: normalizeSigned(this.adaptiveGazeX, rawSignals.gazeX, deltaMs),
+          gazeY: normalizeSigned(this.adaptiveGazeY, rawSignals.gazeY, deltaMs),
         };
+        const triggers = this.triggerEngine.update(signals);
+        this.eventInput = { signals, triggers };
         this.debugFrame = { landmarks, blendshapes, updatedAt: Date.now(), status: 'tracking', message: face ? 'Tracking face landmarks and blendshapes.' : 'Tracking landmarks (blendshapes not yet available).' };
       } else {
-        this.input = { ...DEFAULT_INPUT, facePresent: false, confidence: 0 };
+        const signals: FaceSignals = { ...DEFAULT_SIGNALS, facePresent: false, confidence: 0 };
+        const triggers = this.triggerEngine.update(signals);
+        this.eventInput = { signals, triggers };
         this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'no-face', message: 'Face tracker running — no face detected.' };
       }
     }
