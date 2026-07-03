@@ -14,18 +14,8 @@ export interface CameraCheckScreenOptions {
   onBack: () => void;
 }
 
-function cameraStartErrorMessage(error: unknown): string {
-  if (error instanceof DOMException) {
-    if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
-      return 'Camera access was blocked. Allow the front camera, then try again.';
-    }
-
-    if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-      return 'No front camera was found on this device. Check camera availability, then try again.';
-    }
-  }
-
-  return 'Camera access failed. Check browser camera access, then try again.';
+function cameraStartErrorMessage(): string {
+  return 'Camera Check could not start the front camera. Try again.';
 }
 
 export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen {
@@ -88,7 +78,7 @@ export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen
         return;
       }
 
-      const message = cameraStartErrorMessage(error);
+      const message = cameraStartErrorMessage();
       const details = error instanceof Error ? error.message : String(error);
 
       preview.dataset.status = 'Camera unavailable';
