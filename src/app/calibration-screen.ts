@@ -2,6 +2,7 @@ import type { CalibrationProfile, NormalizedFaceInput } from '../game/core/types
 import { buildCalibration } from '../game/input/calibration/calibration';
 import type { FaceInputService } from '../game/input/face/FaceInputService';
 import { drawFaceOverlay, overlayPaths } from './face-overlay';
+import { button } from './ui';
 
 export interface CalibrationScreenOptions {
   mode: 'landing-test' | 'event';
@@ -18,76 +19,125 @@ export interface CalibrationMount {
   onBack: () => void;
 }
 
-export function buildCalibrationHtml(options: CalibrationScreenOptions, eventTitle: string | undefined, buildCode: string): string {
-  const title = eventTitle ? `${eventTitle} Calibration` : 'Camera Calibration';
-  const helper = eventTitle
-    ? 'Check the camera overlay, then save a neutral face sample before the event starts.'
-    : 'Confirm the camera, facial feature overlay, movement triggers, and calibrated thresholds.';
-  const legend = overlayPaths.map((p) => `<span><i style="background:${p.color}"></i>${p.name}</span>`).join('');
+export interface DiagnosticHtmlOptions {
+  title: string;
+  helper: string;
+  buildCode: string;
+}
+
+export function buildDiagnosticHtml(options: DiagnosticHtmlOptions): string {
+  const legend = overlayPaths
+    .map((path) => `<span><i style="background:${path.color}"></i>${path.name}</span>`)
+    .join('');
+
   return `<main class="screen calibration">
-    <h2>${title}</h2><p>${helper}</p>
-    <p class="build-code" aria-label="Calibration build code">Build ${buildCode}</p>
+    <h2>${options.title}</h2><p>${options.helper}</p>
+    <p class="build-code" aria-label="Calibration build code">Build ${options.buildCode}</p>
     <div id="preview" class="preview camera-test">
       <canvas id="face-overlay" aria-label="Detected facial feature overlay"></canvas>
     </div>
     <section class="legend">${legend}</section>
-    <section class="panel tracker"><h3>Face tracker</h3><p id="tracker-status">Starting…</p></section>
+    <section class="panel tracker"><h3>Face tracker</h3><p id="tracker-status">Starting...</p></section>
     <section class="panel"><h3>Movement triggers</h3><pre id="trigger-console" class="debug console"></pre></section>
     <section class="panel"><h3>Live values + thresholds</h3><pre id="readout" class="debug"></pre></section>
     <div id="actions"></div>
   </main>`;
 }
 
-function button(label: string, onClick: () => void): HTMLButtonElement {
-  const el = document.createElement('button');
-  el.textContent = label;
-  el.addEventListener('click', onClick);
-  return el;
+export function buildCalibrationHtml(
+  options: CalibrationScreenOptions,
+  eventTitle: string | undefined,
+  buildCode: string,
+): string {
+  const title = eventTitle ? `${eventTitle} Calibration` : 'Camera Calibration';
+  const helper = eventTitle
+    ? 'Check the camera overlay, then save a neutral face sample before the event starts.'
+    : 'Confirm the camera, facial feature overlay, movement triggers, and calibrated thresholds.';
+
+  return buildDiagnosticHtml({ title, helper, buildCode });
 }
 
-function logMessage(message: string): void {
-  const box = document.querySelector<HTMLPreElement>('#trigger-console');
-  if (!box) return;
-  const lines = [`${new Date().toLocaleTimeString()} ${message}`, ...box.textContent!.split('\n').filter(Boolean)].slice(0, 24);
+export function logDiagnosticMessage(root: ParentNode, message: string): void {
+  const box = root.querySelector<HTMLPreElement>('#trigger-console');
+
+  if (!box) {
+    return;
+  }
+
+  const lines = [
+    `${new Date().toLocaleTimeString()} ${message}`,
+    ...box.textContent!.split('\n').filter(Boolean),
+  ].slice(0, 24);
   box.textContent = lines.join('\n');
 }
 
 async function captureCalibration(face: FaceInputService): Promise<CalibrationProfile | null> {
   const samples: NormalizedFaceInput[] = [];
+
   for (let i = 0; i < 12; i++) {
     samples.push(face.getInput());
     await new Promise<void>((resolve) => setTimeout(resolve, 80));
   }
+
   const profile = buildCalibration(samples);
-  if (!profile) logMessage('Could not see a face. Try again in bright light with your face centered.');
+
+  if (!profile) {
+    logDiagnosticMessage(
+      document,
+      'Could not see a face. Try again in bright light with your face centered.',
+    );
+  }
+
   return profile;
 }
 
-function startOverlay(face: FaceInputService, video: HTMLVideoElement, getCalibration: () => CalibrationProfile, setRafId: (id: number) => void): void {
-  const preview = document.querySelector<HTMLDivElement>('#preview')!;
-  const canvas = document.querySelector<HTMLCanvasElement>('#face-overlay')!;
-  const readout = document.querySelector<HTMLPreElement>('#readout')!;
-  const trackerStatus = document.querySelector<HTMLParagraphElement>('#tracker-status')!;
-  const ctx = canvas.getContext('2d')!;
+export function startDiagnosticOverlay(
+  root: ParentNode,
+  face: FaceInputService,
+  video: HTMLVideoElement,
+  getCalibration: () => CalibrationProfile,
+  setRafId: (id: number) => void,
+): void {
   let lastStatus = '';
   let lastTriggers: Record<string, boolean> = {};
 
   const draw = () => {
+    const preview = root.querySelector<HTMLDivElement>('#preview');
+    const canvas = root.querySelector<HTMLCanvasElement>('#face-overlay');
+    const readout = root.querySelector<HTMLPreElement>('#readout');
+    const trackerStatus = root.querySelector<HTMLParagraphElement>('#tracker-status');
+
+    if (!preview || !canvas || !readout || !trackerStatus) {
+      return;
+    }
+
+    const ctx = canvas.getContext('2d');
+
+    if (!ctx) {
+      return;
+    }
+
     const calibration = getCalibration();
     const input = face.getInput();
     const frame = face.getDebugFrame();
 
     if (frame.status !== lastStatus) {
-      logMessage(`Face tracker: ${frame.status} — ${frame.message}`);
+      logDiagnosticMessage(root, `Face tracker: ${frame.status} - ${frame.message}`);
       lastStatus = frame.status;
     }
+
     trackerStatus.textContent = `${frame.status.toUpperCase()}: ${frame.message}`;
 
-    const w = preview.clientWidth;
-    const h = preview.clientHeight;
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    ctx.clearRect(0, 0, w, h);
-    drawFaceOverlay(ctx, frame, input, video, w, h);
+    const width = preview.clientWidth;
+    const height = preview.clientHeight;
+
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    ctx.clearRect(0, 0, width, height);
+    drawFaceOverlay(ctx, frame, input, video, width, height);
 
     const triggers: Record<string, boolean> = {
       'face detected': input.facePresent,
@@ -100,12 +150,18 @@ function startOverlay(face: FaceInputService, video: HTMLVideoElement, getCalibr
       'mouth open': input.mouthOpen >= calibration.thresholds.mouthOpen,
       'lips pursed': input.lipsPursed,
     };
-    for (const [name, active] of Object.entries(triggers)) {
-      if (active && !lastTriggers[name]) logMessage(`▶ ${name}`);
-      if (!active && lastTriggers[name]) logMessage(`■ ${name} ended`);
-    }
-    lastTriggers = triggers;
 
+    for (const [name, active] of Object.entries(triggers)) {
+      if (active && !lastTriggers[name]) {
+        logDiagnosticMessage(root, `> ${name}`);
+      }
+
+      if (!active && lastTriggers[name]) {
+        logDiagnosticMessage(root, `- ${name} ended`);
+      }
+    }
+
+    lastTriggers = triggers;
     readout.textContent = JSON.stringify({
       tracker: { status: frame.status, landmarks: frame.landmarks.length },
       input,
@@ -119,32 +175,52 @@ function startOverlay(face: FaceInputService, video: HTMLVideoElement, getCalibr
   setRafId(requestAnimationFrame(draw));
 }
 
-export async function mountCalibration(options: CalibrationScreenOptions, mount: CalibrationMount): Promise<void> {
+export async function mountCalibration(
+  options: CalibrationScreenOptions,
+  mount: CalibrationMount,
+): Promise<void> {
   const { face, getCalibration, setCalibration, onReset, setRafId, onPlay, onBack } = mount;
   const isEvent = options.mode === 'event';
 
   document.querySelector('#actions')!.append(
     button(isEvent ? 'Save Calibration + Play' : 'Save Calibration', async () => {
       const profile = await captureCalibration(face);
-      if (!profile) return;
+
+      if (!profile) {
+        return;
+      }
+
       setCalibration(profile);
-      if (isEvent) onPlay();
-      else logMessage('Calibration saved. Try blinking, brows, and mouth movements to confirm the trigger console.');
+
+      if (isEvent) {
+        onPlay();
+      } else {
+        logDiagnosticMessage(
+          document,
+          'Calibration saved. Try blinking, brows, and mouth movements to confirm the trigger console.',
+        );
+      }
     }),
     button(isEvent ? 'Practice Without Camera' : 'Reset to Defaults', () => {
       onReset();
-      if (isEvent) onPlay();
-      else logMessage('Default calibration restored.');
+
+      if (isEvent) {
+        onPlay();
+      } else {
+        logDiagnosticMessage(document, 'Default calibration restored.');
+      }
     }),
     button('Back', onBack),
   );
 
   const preview = document.querySelector<HTMLDivElement>('#preview')!;
-  preview.dataset.status = 'Starting front camera…';
+  preview.dataset.status = 'Starting front camera...';
+
   const video = await face.start();
+
   preview.dataset.status = '';
   preview.prepend(video);
 
-  logMessage('Calibration overlay ready. Move eyes, brows, mouth, and face.');
-  startOverlay(face, video, getCalibration, setRafId);
+  logDiagnosticMessage(document, 'Calibration overlay ready. Move eyes, brows, mouth, and face.');
+  startDiagnosticOverlay(document, face, video, getCalibration, setRafId);
 }
