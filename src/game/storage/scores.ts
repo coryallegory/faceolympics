@@ -15,9 +15,12 @@ function isStoredResult(value: unknown): value is EventResult {
 }
 
 export function saveResult(result: EventResult): void {
-  const history = loadResults().filter((item) => item.eventId !== result.eventId);
+  const history = loadResults();
+  const existing = history.find((item) => item.eventId === result.eventId);
+  const best = existing && existing.score >= result.score ? existing : result;
+  const others = history.filter((item) => item.eventId !== result.eventId);
 
-  localStorage.setItem(KEY, JSON.stringify([...history, result]));
+  localStorage.setItem(KEY, JSON.stringify([...others, best]));
 }
 
 export function loadResults(): EventResult[] {
