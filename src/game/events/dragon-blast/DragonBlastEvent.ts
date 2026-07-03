@@ -1,7 +1,7 @@
 import type {
-  CalibrationProfile,
   EventContext,
   EventFrameResult,
+  EventInput,
   EventResult,
   FaceOlympicsEvent,
   NormalizedFaceInput,
@@ -23,7 +23,7 @@ export class DragonBlastEvent implements FaceOlympicsEvent {
 
   init(_context: EventContext): void {}
 
-  start(_calibration: CalibrationProfile): void {
+  start(): void {
     this.elapsed = 0;
     this.charge = 0;
     this.hits = 0;
@@ -31,17 +31,21 @@ export class DragonBlastEvent implements FaceOlympicsEvent {
     this.finished = false;
   }
 
-  update(deltaMs: number, input: NormalizedFaceInput): EventFrameResult {
+  // See BlinkOffEvent.update for why the parameter is still widened to include the
+  // deprecated NormalizedFaceInput shape -- purely a type-level seam until P0.3.
+  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
+    const { triggers } = rawInput as EventInput;
+
     this.elapsed += deltaMs;
 
-    const charging = input.mouthOpen > 0.55;
+    const charging = triggers.mouthOpen;
 
     if (charging) {
       this.charge = Math.min(1, this.charge + deltaMs / 1400);
       this.wasCharging = true;
     }
 
-    const release = (this.wasCharging && !charging) || input.lipsPursed;
+    const release = (this.wasCharging && !charging) || triggers.lipsPursed;
 
     if (release) {
       if (this.charge >= dragonBlastConfig.chargeToHit) {

@@ -1,7 +1,7 @@
 import type {
-  CalibrationProfile,
   EventContext,
   EventFrameResult,
+  EventInput,
   EventResult,
   FaceOlympicsEvent,
   NormalizedFaceInput,
@@ -21,24 +21,31 @@ export class BlinkOffEvent implements FaceOlympicsEvent {
 
   init(_context: EventContext): void {}
 
-  start(_calibration: CalibrationProfile): void {
+  start(): void {
     this.elapsed = 0;
     this.penalty = 0;
     this.finished = false;
   }
 
-  update(deltaMs: number, input: NormalizedFaceInput): EventFrameResult {
+  // The parameter stays widened to `NormalizedFaceInput | EventInput` so this class
+  // remains structurally assignable to FaceOlympicsEvent.update(deltaMs,
+  // NormalizedFaceInput) -- that interface (src/game/core/types.ts) can't drop the
+  // deprecated shape until P0.3 removes it. Every real caller (play.ts, events.test.ts)
+  // passes an actual EventInput; narrow to it immediately and read triggers/signals only.
+  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
+    const { signals, triggers } = rawInput as EventInput;
+
     if (this.finished) {
       return this.frame('Done!');
     }
 
     this.elapsed += deltaMs;
 
-    if (!input.facePresent) {
+    if (!signals.facePresent) {
       this.penalty += deltaMs * 0.5;
     }
 
-    if (input.bothEyesClosed) {
+    if (triggers.bothEyesClosed) {
       this.penalty += blinkOffConfig.blinkPenaltyMs;
       this.finished = true;
     }
@@ -47,7 +54,7 @@ export class BlinkOffEvent implements FaceOlympicsEvent {
       this.finished = true;
     }
 
-    return this.frame(input.bothEyesClosed ? 'Blink bonk!' : 'Hold those eyes open!');
+    return this.frame(triggers.bothEyesClosed ? 'Blink bonk!' : 'Hold those eyes open!');
   }
 
   pause(): void {}

@@ -1,10 +1,8 @@
 import {
-  DEFAULT_CALIBRATION,
   DEFAULT_THRESHOLDS,
   type EventFrameResult,
   type EventInput,
   type FaceOlympicsEvent,
-  type NormalizedFaceInput,
 } from '../../game/core/types';
 import type { FaceInputService } from '../../game/input/face/FaceInputService';
 import { drawFaceOverlay } from '../face-overlay';
@@ -27,41 +25,31 @@ export function clampFrameDelta(rawDelta: number): number {
   return Math.min(rawDelta, MAX_FRAME_DELTA_MS);
 }
 
-// Temporary bridge until D1 migrates the event classes to EventInput/triggers directly.
-// The three FaceOlympicsEvent implementations (src/game/events/**) still implement the
-// pre-A4 interface — start(calibration: CalibrationProfile), update(deltaMs,
-// NormalizedFaceInput) — because that interface lives in src/game/core/types.ts, which
-// this task is explicitly not allowed to touch (deprecated members are removed in a later
-// coordinated PR once B2 and D1 have landed). This adapts FaceInputService's new
-// EventInput into the legacy shape so gameplay keeps working across the transition.
-// Mapping mirrors P0.1's own migration note: bothEyesClosed -> triggers.bothEyesClosed,
-// mouthOpen number -> signals.mouthOpen, eyebrowsRaised -> max(browRaiseLeft,
-// browRaiseRight), lipsPursed -> triggers.lipsPursed. Remove this once D1 lands.
-function toLegacyInput({ signals, triggers }: EventInput): NormalizedFaceInput {
-  return {
-    facePresent: signals.facePresent,
-    confidence: signals.confidence,
-    bothEyesClosed: triggers.bothEyesClosed,
-    leftBlink: triggers.blinkLeft,
-    rightBlink: triggers.blinkRight,
-    mouthOpen: signals.mouthOpen,
-    lipsPursed: triggers.lipsPursed,
-    eyebrowsRaised: Math.max(signals.browRaiseLeft, signals.browRaiseRight),
-    leftEyebrowRaised: signals.browRaiseLeft,
-    rightEyebrowRaised: signals.browRaiseRight,
-    headRoll: 0,
-  };
+// D1 migrated the three event classes (src/game/events/**) to a zero-arg start() and an
+// EventInput-driven update() -- no more CalibrationProfile, no more value-shape bridge
+// function (the legacy input-conversion helper that used to sit here is gone entirely;
+// getEventInput()'s result is passed straight through below, untransformed). FaceOlympicsEvent
+// in src/game/core/types.ts (a contract file this task can't touch) still declares the
+// pre-migration signature -- start(calibration), update(deltaMs, NormalizedFaceInput) --
+// because it can't drop that shape until P0.3 removes it from types.ts once every consumer
+// (this task included) has migrated. PlayableEvent is a type-only seam bridging that gap: no
+// data is transformed, only the static type of the call is asserted to match what the
+// migrated classes actually implement.
+interface PlayableEvent {
+  start(): void;
+  update(deltaMs: number, input: EventInput): EventFrameResult;
+}
+
+function asPlayable(event: FaceOlympicsEvent): PlayableEvent {
+  return event as unknown as PlayableEvent;
 }
 
 export function showPlayScreen(options: PlayScreenOptions): Screen {
   return (ctx) => {
     const { event, face, onExit, onFinish } = options;
+    const playable = asPlayable(event);
 
-    // DEFAULT_CALIBRATION is the same bridge as toLegacyInput above: events still require
-    // a CalibrationProfile argument to start() until D1 lands. There is no more
-    // calibration wizard (Decision #2 in the backlog) so a fixed default is correct here,
-    // not a regression.
-    event.start(DEFAULT_CALIBRATION);
+    playable.start();
 
     let last = performance.now();
 
@@ -108,7 +96,7 @@ export function showPlayScreen(options: PlayScreenOptions): Screen {
       const delta = clampFrameDelta(rawDelta);
 
       const eventInput = face.getEventInput();
-      const frame = event.update(delta, toLegacyInput(eventInput));
+      const frame = playable.update(delta, eventInput);
 
       updateArena(mascot, feedback, score, mascotLabel, frame);
       updateDebug(details, debug, eventInput, frame);
