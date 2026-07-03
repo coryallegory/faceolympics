@@ -9,11 +9,13 @@ import type {
 import { BlinkOffEvent } from './blink-off/BlinkOffEvent';
 import { DragonBlastEvent } from './dragon-blast/DragonBlastEvent';
 import { FaceWeightliftingEvent } from './face-weightlifting/FaceWeightliftingEvent';
+import { LookOutEvent } from './look-out/LookOutEvent';
 
 export const eventFactories: Record<string, () => FaceOlympicsEvent> = {
   'blink-off': () => new BlinkOffEvent(),
   'face-weightlifting': () => new FaceWeightliftingEvent(),
   'dragon-blast': () => new DragonBlastEvent(),
+  'look-out': () => new LookOutEvent(),
 };
 
 // eventList exists so menu/browse screens can read id/title/description
@@ -66,5 +68,11 @@ export const eventList: readonly FaceOlympicsEvent[] = [
     'Dragon Blast',
     'Open your mouth to charge dragon fire, then close or purse lips to blast targets.',
     ['mouthOpen', 'lipsPursed', 'facePresent'],
+  ),
+  metadataEntry(
+    'look-out',
+    'Look Out',
+    'Watch for the cue and dodge the right way, fast, by looking left or right.',
+    ['lookLeft', 'lookRight', 'facePresent'],
   ),
 ];
