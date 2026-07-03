@@ -67,6 +67,16 @@ describe('TriggerEngine', () => {
     triggers = engine.update(createSignals({ gazeX: -0.24 }));
     expect(triggers.lookLeft).toBe(false);
 
+    triggers = engine.update(createSignals({ gazeX: 0.4 }));
+    expect(triggers.lookRight).toBe(true);
+    expect(triggers.lookLeft).toBe(false);
+
+    triggers = engine.update(createSignals({ gazeX: 0.3 }));
+    expect(triggers.lookRight).toBe(true);
+
+    triggers = engine.update(createSignals({ gazeX: 0.24 }));
+    expect(triggers.lookRight).toBe(false);
+
     triggers = engine.update(createSignals({ gazeY: 0.41 }));
     expect(triggers.lookUp).toBe(true);
     expect(triggers.lookDown).toBe(false);
@@ -79,6 +89,12 @@ describe('TriggerEngine', () => {
 
     triggers = engine.update(createSignals({ gazeY: -0.41 }));
     expect(triggers.lookDown).toBe(true);
+
+    triggers = engine.update(createSignals({ gazeY: -0.3 }));
+    expect(triggers.lookDown).toBe(true);
+
+    triggers = engine.update(createSignals({ gazeY: -0.24 }));
+    expect(triggers.lookDown).toBe(false);
   });
 
   it('requires both eye triggers to be active before bothEyesClosed becomes true', () => {
@@ -96,9 +112,20 @@ describe('TriggerEngine', () => {
   it('keeps blink triggers active through the hysteresis dead zone and clears after the eye reopen threshold', () => {
     const engine = new TriggerEngine(DEFAULT_THRESHOLDS);
 
-    expect(engine.update(createSignals({ eyeOpenLeft: 0.46 })).blinkLeft).toBe(false);
-    expect(engine.update(createSignals({ eyeOpenLeft: 0.45 })).blinkLeft).toBe(true);
-    expect(engine.update(createSignals({ eyeOpenLeft: 0.59 })).blinkLeft).toBe(true);
-    expect(engine.update(createSignals({ eyeOpenLeft: 0.61 })).blinkLeft).toBe(false);
+    let triggers = engine.update(createSignals({ eyeOpenLeft: 0.46, eyeOpenRight: 0.46 }));
+    expect(triggers.blinkLeft).toBe(false);
+    expect(triggers.blinkRight).toBe(false);
+
+    triggers = engine.update(createSignals({ eyeOpenLeft: 0.45, eyeOpenRight: 0.45 }));
+    expect(triggers.blinkLeft).toBe(true);
+    expect(triggers.blinkRight).toBe(true);
+
+    triggers = engine.update(createSignals({ eyeOpenLeft: 0.59, eyeOpenRight: 0.59 }));
+    expect(triggers.blinkLeft).toBe(true);
+    expect(triggers.blinkRight).toBe(true);
+
+    triggers = engine.update(createSignals({ eyeOpenLeft: 0.61, eyeOpenRight: 0.61 }));
+    expect(triggers.blinkLeft).toBe(false);
+    expect(triggers.blinkRight).toBe(false);
   });
 });
