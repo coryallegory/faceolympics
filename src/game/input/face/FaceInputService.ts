@@ -1,6 +1,6 @@
 import { FaceLandmarker, FilesetResolver, type NormalizedLandmark } from '@mediapipe/tasks-vision';
 import { DEFAULT_INPUT, type NormalizedFaceInput } from '../../core/types';
-import { combineBrowSignals, estimateBrowLiftFromLandmarks } from './brow-metrics';
+import { mapToSignals } from './signal-mapper';
 
 export type FaceTrackerStatus = 'idle' | 'loading' | 'ready' | 'tracking' | 'no-face' | 'error';
 
@@ -112,31 +112,23 @@ export class FaceInputService {
       const landmarks = result.faceLandmarks[0] ?? [];
       if (landmarks.length > 0) {
         const blendshapes = face ? Object.fromEntries(face.categories.map((item) => [item.categoryName, item.score])) : {};
-        const score = (name: string): number => blendshapes[name] ?? 0;
-        // MediaPipe blendshape names use camera-image perspective where "left" = left of the
-        // raw (unmirrored) image, which is the subject's physical right side. Swap here so
-        // leftBlink/rightBlink match the subject's actual anatomy.
-        const imgLeft = score('eyeBlinkLeft');
-        const imgRight = score('eyeBlinkRight');
-        const geometryBrow = estimateBrowLiftFromLandmarks(landmarks);
-        const imgLeftBrow = combineBrowSignals(Math.max(score('browOuterUpLeft'), score('browInnerUp')), geometryBrow.left);
-        const imgRightBrow = combineBrowSignals(Math.max(score('browOuterUpRight'), score('browInnerUp')), geometryBrow.right);
+        const signals = mapToSignals(blendshapes, landmarks);
         // Hysteresis: close at 0.5, re-open only once score drops below 0.25.
-        if (imgRight > 0.5) this.blinkState.left = true;
-        else if (imgRight < 0.25) this.blinkState.left = false;
-        if (imgLeft > 0.5) this.blinkState.right = true;
-        else if (imgLeft < 0.25) this.blinkState.right = false;
+        if (signals.eyeOpenLeft < 0.5) this.blinkState.left = true;
+        else if (signals.eyeOpenLeft > 0.75) this.blinkState.left = false;
+        if (signals.eyeOpenRight < 0.5) this.blinkState.right = true;
+        else if (signals.eyeOpenRight > 0.75) this.blinkState.right = false;
         this.input = {
-          facePresent: true,
-          confidence: face ? Math.max(...face.categories.map((item) => item.score), 0.5) : 0.75,
+          facePresent: signals.facePresent,
+          confidence: signals.confidence,
           leftBlink: this.blinkState.left,
           rightBlink: this.blinkState.right,
           bothEyesClosed: this.blinkState.left && this.blinkState.right,
-          mouthOpen: score('jawOpen'),
-          lipsPursed: score('mouthPucker') > 0.45,
-          eyebrowsRaised: Math.max(imgLeftBrow, imgRightBrow),
-          leftEyebrowRaised: imgRightBrow,
-          rightEyebrowRaised: imgLeftBrow,
+          mouthOpen: signals.mouthOpen,
+          lipsPursed: signals.lipPucker > 0.45,
+          eyebrowsRaised: Math.max(signals.browRaiseLeft, signals.browRaiseRight),
+          leftEyebrowRaised: signals.browRaiseLeft,
+          rightEyebrowRaised: signals.browRaiseRight,
           headRoll: 0,
         };
         this.debugFrame = { landmarks, blendshapes, updatedAt: Date.now(), status: 'tracking', message: face ? 'Tracking face landmarks and blendshapes.' : 'Tracking landmarks (blendshapes not yet available).' };
