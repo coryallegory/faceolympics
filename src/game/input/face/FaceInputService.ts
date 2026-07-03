@@ -6,7 +6,9 @@ import {
   DEFAULT_TRIGGERS,
   type EventInput,
   type FaceSignals,
+  type TriggerThresholds,
 } from '../../core/types';
+import type { TuningState } from '../../storage/tuning';
 import { AdaptiveRange } from './adaptive-range';
 import { mapToSignals } from './signal-mapper';
 import { TriggerEngine } from './trigger-engine';
@@ -82,7 +84,8 @@ export class FaceInputService {
   private lastTickAt = 0;
   private running = false;
 
-  private readonly triggerEngine = new TriggerEngine(DEFAULT_THRESHOLDS);
+  private thresholds: TriggerThresholds = { ...DEFAULT_THRESHOLDS };
+  private triggerEngine = new TriggerEngine(this.thresholds);
   private readonly adaptiveBrowLeft = new AdaptiveRange();
   private readonly adaptiveBrowRight = new AdaptiveRange();
   private readonly adaptiveGazeX = new AdaptiveRange();
@@ -121,6 +124,25 @@ export class FaceInputService {
   getEventInput(): EventInput { return this.eventInput; }
   getSignals(): FaceSignals { return this.eventInput.signals; }
   getDebugFrame(): FaceDebugFrame { return this.debugFrame; }
+  getTuningSnapshot(): TuningState {
+    return {
+      thresholds: { ...this.thresholds },
+      adaptive: {
+        browRaiseLeft: this.adaptiveBrowLeft.snapshot(),
+        browRaiseRight: this.adaptiveBrowRight.snapshot(),
+        gazeX: this.adaptiveGazeX.snapshot(),
+        gazeY: this.adaptiveGazeY.snapshot(),
+      },
+    };
+  }
+
+  seedTuning(state: TuningState): void {
+    this.adaptiveBrowLeft.seed(state.adaptive.browRaiseLeft.low, state.adaptive.browRaiseLeft.high);
+    this.adaptiveBrowRight.seed(state.adaptive.browRaiseRight.low, state.adaptive.browRaiseRight.high);
+    this.adaptiveGazeX.seed(state.adaptive.gazeX.low, state.adaptive.gazeX.high);
+    this.adaptiveGazeY.seed(state.adaptive.gazeY.low, state.adaptive.gazeY.high);
+    this.applyThresholds(state.thresholds);
+  }
 
   // Releases the camera (tracks + preview) and halts the tick loop, but deliberately keeps
   // the loaded FaceLandmarker around so a later start() can resume tracking immediately
@@ -144,6 +166,15 @@ export class FaceInputService {
     const signals: FaceSignals = { ...this.eventInput.signals, ...patch };
     const triggers = this.triggerEngine.update(signals);
     this.eventInput = { signals, triggers };
+  }
+
+  private applyThresholds(thresholds: TriggerThresholds): void {
+    this.thresholds = { ...thresholds };
+    this.triggerEngine = new TriggerEngine(this.thresholds);
+    this.eventInput = {
+      signals: this.eventInput.signals,
+      triggers: this.triggerEngine.update(this.eventInput.signals),
+    };
   }
 
   // Schedules the next detection tick in sync with new video frames where supported,
