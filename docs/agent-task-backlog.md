@@ -184,6 +184,24 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
 - **Depends:** F1, P0.1.
 - **Verify:** typecheck/test/lint green; manual smoke test (bottom of doc) passes.
 
+### P0.3 (P2). Remove deprecated legacy-input members from `types.ts`
+
+- **Files:** `src/game/core/types.ts` only.
+- **Problem:** A4 introduced the new signals/triggers pipeline but, to stay unblocked, deferred
+  deleting the deprecated `NormalizedFaceInput`, `CalibrationProfile`, `DEFAULT_INPUT`,
+  `DEFAULT_CALIBRATION` exports — they were still referenced (`play.ts`'s temporary bridge, and
+  the three event classes' `start(calibration)` signature) at the time A4 merged. Leaving them
+  in place indefinitely is tech debt in a contract file.
+- **Change:** delete the four deprecated exports and their `@deprecated` jsdoc. Before deleting,
+  grep the repo for any remaining references — there should be none once B2 and D1 have merged;
+  if any remain, stop and flag rather than deleting a still-used type (that means one of B2/D1
+  didn't fully migrate).
+- **Depends:** A4, B2, D1 (all three — D1 removes the last consumer of `CalibrationProfile` via
+  `event.start()`; B2 is the doc's original sequencing choice, confirm no residual references
+  before deleting).
+- **Verify:** typecheck/test/lint green; `git grep` for the four removed names outside `types.ts`
+  returns nothing.
+
 ---
 
 ## Track A — Input pipeline (owns `src/game/input/**`)
@@ -241,15 +259,22 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
 ### A4 (P1). Rewire `FaceInputService` to signals/triggers; retire the old pipeline
 
 - **Files:** `src/game/input/face/FaceInputService.ts`, `src/app/screens/play.ts`,
-  `src/app/calibration-screen.ts` (mechanical call-site updates only),
-  `src/game/input/calibration/` (delete), `src/game/core/types.ts` deprecated members (delete —
-  coordinate: this is the one sanctioned post-P0 types edit; land it when B2 and D1 are merged).
+  `src/app/calibration-screen.ts`, `src/game/input/calibration/` (delete). Also covers narrow,
+  forced call-site updates in any other file whose function signature changes as a direct,
+  non-design-decision consequence of retiring `CalibrationProfile` (e.g. `src/app/face-overlay.ts`,
+  `src/app/screens/camera-check.ts` — precedent set and owner-ratified in A4's own PR review;
+  if an edit requires a judgment call on another track's behalf rather than a mechanical type
+  fixup, stop and escalate instead).
 - **Change:** `tick()` = detect → `mapToSignals` → adaptive-normalize brow/gaze → `TriggerEngine`
   → store. Public API: `getEventInput(): EventInput`, `getSignals()`, `getDebugFrame()`,
   `setDebugInput(patch)` reworked to patch signals. Remove `getInput()`/`NormalizedFaceInput`
   usage everywhere; delete `calibration.ts` and `CalibrationProfile` plumbing
-  (`main.ts`/`app-state.ts` keep only `TriggerThresholds` + adaptive state).
-- **Depends:** A1, A2, A3, P0.2. **Blocks:** B2, B3, B4, D1.
+  (`main.ts`/`app-state.ts` keep only `TriggerThresholds` + adaptive state). `play.ts` may keep a
+  clearly-marked temporary bridge back to the legacy `NormalizedFaceInput`/`CalibrationProfile`
+  shape for the three still-unmigrated event classes — **do not** delete
+  `src/game/core/types.ts`'s deprecated members in this task; that's split out as **P0.3** since
+  it can't land until D1 stops passing `CalibrationProfile` into `event.start()`.
+- **Depends:** A1, A2, A3, P0.2. **Blocks:** B2, B3, B4, D1, P0.3.
 - **Verify:** typecheck/test/lint; manual smoke test — triggers fire on the camera-test screen.
 
 ### A5 (P1). Handle camera-permission failure at the service boundary
@@ -378,15 +403,20 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
 
 ### D1 (P1). Events consume triggers (drop remaining raw-threshold hacks)
 
-- **Files:** the three event classes, `events.test.ts`.
+- **Files:** the three event classes, `events.test.ts`, `src/app/screens/play.ts`.
 - **Problem:** After P0.1's mechanical migration, Dragon Blast still compares
   `signals.mouthOpen > 0.55` and Weightlifting still applies its own brow threshold — both
   should use `triggers.mouthOpen` / `triggers.browsRaised` so hysteresis and adaptive
-  normalization apply uniformly. `start(calibration)` parameters become vestigial.
+  normalization apply uniformly. `start(calibration)` parameters become vestigial. A4 also left a
+  temporary `toLegacyInput`/`DEFAULT_CALIBRATION` bridge in `play.ts` so it could keep driving
+  events through the old `NormalizedFaceInput` shape until this task lands.
 - **Change:** switch both to triggers; change `start()` signature per whatever P0.1/A4 left
-  (target: `start(): void`). Blink-Off already uses `triggers.bothEyesClosed` post-P0.1.
-- **Depends:** P0.1, A4. **Verify:** updated unit tests drive events purely via `EventInput`
-  fixtures.
+  (target: `start(): void`), taking `EventInput` directly. Blink-Off already uses
+  `triggers.bothEyesClosed` post-P0.1. Remove `play.ts`'s `toLegacyInput` bridge and call
+  `event.start()`/`event.update()` with `getEventInput()`'s result directly — this is what
+  actually retires the bridge, not just a follow-on cleanup.
+- **Depends:** P0.1, A4. **Blocks:** P0.3. **Verify:** updated unit tests drive events purely via
+  `EventInput` fixtures; `git grep toLegacyInput` returns nothing.
 
 ### D2 (P2). Broaden event tests
 
