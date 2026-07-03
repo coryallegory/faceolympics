@@ -328,6 +328,33 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
   Only worth doing if manual testing shows pitch artifacts after A3 lands.
 - **Depends:** A4.
 
+### A9 (P1). Expose tuning seed/snapshot API on `FaceInputService`
+
+- **Files:** `src/game/input/face/FaceInputService.ts`, and `trigger-engine.ts` only if a
+  thresholds setter turns out to be the cleaner option there (see Change).
+- **Problem:** B2 needs to seed persisted tuning (a `TuningState` from C3's `loadTuning()`) into
+  the running `FaceInputService` on boot, and read the current tuning back out to persist on
+  results / when leaving Camera Check. Today the service's four `AdaptiveRange` fields
+  (`adaptiveBrowLeft`, `adaptiveBrowRight`, `adaptiveGazeX`, `adaptiveGazeY`) and its
+  `TriggerEngine` (constructed once with the hardcoded `DEFAULT_THRESHOLDS`) are `private
+  readonly`, with no way for a caller to seed or read them. B2's implementer correctly stopped
+  rather than edit a Track A file outside its ownership — see issue #22's blocked comment for
+  the full analysis.
+- **Change:** add two public methods to `FaceInputService`:
+  - `seedTuning(state: TuningState): void` — calls `.seed(low, high)` (already exists on
+    `AdaptiveRange`) on each of the four adaptive fields from `state.adaptive`, and applies
+    `state.thresholds` to the trigger engine — simplest is replacing `this.triggerEngine` with
+    `new TriggerEngine(state.thresholds)` rather than adding a setter to `TriggerEngine`, unless
+    that proves awkward against `TriggerEngine`'s current internal `triggers` state.
+  - `getTuningSnapshot(): TuningState` — reads `{low, high}` back from each `AdaptiveRange`'s
+    existing `snapshot()` method, plus the currently-active `TriggerThresholds` (store whatever
+    thresholds were last applied in a field, since `TriggerEngine` doesn't expose them back out).
+- **Depends:** A4 (merged). **Blocks:** B2.
+- **Verify:** unit test — `seedTuning()` followed by `getTuningSnapshot()` round-trips the
+  per-channel low/high and thresholds; a freshly seeded `AdaptiveRange` channel no longer
+  behaves as cold-start for a value inside the seeded span (i.e. `normalize()` remaps it instead
+  of passing the raw value through, per `AdaptiveRange`'s existing guardrail behavior).
+
 ---
 
 ## Track B — Camera Check & boot wiring (owns `src/app/screens/camera-check.ts`, menu/boot wiring)
@@ -352,10 +379,14 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
   `src/app/screens/menu.ts` (adding the Camera Check entry — coordinate with Track D if
   concurrent).
 - **Change:** Boot goes title → menu with no camera start. On boot, load persisted tuning
-  (thresholds + adaptive-range seeds) via Track C's C3 API and `seed()` the service; save
-  tuning state on results and when leaving Camera Check. Add the "Camera Check" menu button.
-- **Depends:** B1, A4, C3. **Verify:** reload restores tuning (inspect localStorage); no
-  permission prompt appears until an event or Camera Check is opened.
+  (thresholds + adaptive-range seeds) via Track C's C3 API and `seed()` the service — using
+  A9's `seedTuning()`/`getTuningSnapshot()`, not by reaching into `FaceInputService`'s private
+  state; save tuning state on results and when leaving Camera Check. Add the "Camera Check"
+  menu button.
+- **Depends:** B1, A4, C3, A9 (blocked without it — `FaceInputService` had no public API to
+  seed/read adaptive-range or threshold state; see issue #22). **Verify:** reload restores
+  tuning (inspect localStorage); no permission prompt appears until an event or Camera Check is
+  opened.
 
 ### B3 (P2). Brow quick-tune
 
