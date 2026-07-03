@@ -12,6 +12,7 @@ export interface CalibrationMount {
   face: FaceInputService;
   setRafId: (id: number) => void;
   onPlay: () => void;
+  onRetry: () => void;
   onBack: () => void;
 }
 
@@ -144,31 +145,64 @@ export async function mountCalibration(
   options: CalibrationScreenOptions,
   mount: CalibrationMount,
 ): Promise<void> {
-  const { face, setRafId, onPlay, onBack } = mount;
+  const { face, setRafId, onPlay, onRetry, onBack } = mount;
   const isEvent = options.mode === 'event';
 
-  document.querySelector('#actions')!.append(
-    button(isEvent ? 'Play' : 'Continue', () => {
-      if (isEvent) {
-        onPlay();
-      } else {
-        logDiagnosticMessage(
-          document,
-          'Try blinking, brows, and mouth movements to confirm the trigger console.',
-        );
-      }
-    }),
-    button('Back', onBack),
-  );
-
+  const actions = document.querySelector<HTMLDivElement>('#actions')!;
   const preview = document.querySelector<HTMLDivElement>('#preview')!;
+  const trackerStatus = document.querySelector<HTMLParagraphElement>('#tracker-status')!;
+  const readout = document.querySelector<HTMLPreElement>('#readout')!;
+
+  const renderActions = (showRetry: boolean): void => {
+    actions.replaceChildren(
+      ...(showRetry ? [button('Retry', onRetry)] : [
+        button(isEvent ? 'Play' : 'Continue', () => {
+          if (isEvent) {
+            onPlay();
+          } else {
+            logDiagnosticMessage(
+              document,
+              'Try blinking, brows, and mouth movements to confirm the trigger console.',
+            );
+          }
+        }),
+      ]),
+      button('Back', onBack),
+    );
+  };
+
+  renderActions(false);
   preview.dataset.status = 'Starting front camera...';
 
-  const video = await face.start();
+  const isActive = (): boolean => document.contains(preview);
 
-  preview.dataset.status = '';
-  preview.prepend(video);
+  try {
+    const video = await face.start();
 
-  logDiagnosticMessage(document, 'Diagnostic overlay ready. Move eyes, brows, mouth, and face.');
-  startDiagnosticOverlay(document, face, video, setRafId);
+    if (!isActive()) {
+      return;
+    }
+
+    preview.dataset.status = '';
+    preview.prepend(video);
+
+    logDiagnosticMessage(document, 'Diagnostic overlay ready. Move eyes, brows, mouth, and face.');
+    startDiagnosticOverlay(document, face, video, setRafId);
+  } catch (error) {
+    if (!isActive()) {
+      return;
+    }
+
+    // FaceInputService.start() sets debugFrame.status = 'error' with a friendly message
+    // before rejecting, so read the shared message from the service instead of maintaining
+    // a second, locally hardcoded copy here (mirrors camera-check.ts).
+    const message = face.getDebugFrame().message;
+    const details = error instanceof Error ? error.message : String(error);
+
+    preview.dataset.status = 'Camera unavailable';
+    trackerStatus.textContent = `ERROR: ${message}`;
+    readout.textContent = JSON.stringify({ error: message, details }, null, 2);
+    logDiagnosticMessage(document, `${message}${details ? ` (${details})` : ''}`);
+    renderActions(true);
+  }
 }
