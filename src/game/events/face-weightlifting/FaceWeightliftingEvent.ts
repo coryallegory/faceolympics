@@ -1,7 +1,7 @@
 import type {
-  CalibrationProfile,
   EventContext,
   EventFrameResult,
+  EventInput,
   EventResult,
   FaceOlympicsEvent,
   NormalizedFaceInput,
@@ -19,30 +19,34 @@ export class FaceWeightliftingEvent implements FaceOlympicsEvent {
   private height = 0;
   private hold = 0;
   private finished = false;
-  private eyebrowThreshold = 0.55;
 
   init(_context: EventContext): void {}
 
-  start(calibration: CalibrationProfile): void {
+  start(): void {
     this.elapsed = 0;
     this.height = 0;
     this.hold = 0;
     this.finished = false;
-    this.eyebrowThreshold = calibration.thresholds.eyebrowsRaised;
   }
 
-  update(deltaMs: number, input: NormalizedFaceInput): EventFrameResult {
+  // See BlinkOffEvent.update for why the parameter is still widened to include the
+  // deprecated NormalizedFaceInput shape -- purely a type-level seam until P0.3. The
+  // brow-raise trigger is computed centrally (hysteresis + adaptive normalization), so
+  // this event no longer tracks its own eyebrow threshold.
+  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
+    const { triggers } = rawInput as EventInput;
+
     this.elapsed += deltaMs;
 
-    const lift = input.eyebrowsRaised > this.eyebrowThreshold;
+    const lift = triggers.browsRaised;
 
     this.height = Math.min(1, Math.max(0, this.height + (lift ? 0.0012 : -0.0006) * deltaMs));
 
-    if (this.height > 0.82 && !input.bothEyesClosed) {
+    if (this.height > 0.82 && !triggers.bothEyesClosed) {
       this.hold += deltaMs;
     }
 
-    if (input.bothEyesClosed) {
+    if (triggers.bothEyesClosed) {
       this.height = Math.max(0, this.height - 0.2);
     }
 
