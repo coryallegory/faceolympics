@@ -1,4 +1,3 @@
-import type { CalibrationProfile } from '../../game/core/types';
 import type { FaceInputService } from '../../game/input/face/FaceInputService';
 import {
   buildDiagnosticHtml,
@@ -10,7 +9,6 @@ import { button } from '../ui';
 
 export interface CameraCheckScreenOptions {
   face: FaceInputService;
-  getCalibration: () => CalibrationProfile;
   onBack: () => void;
 }
 
@@ -51,7 +49,6 @@ export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen
     trackerStatus.textContent = 'STARTING: Requesting front camera access...';
     readout.textContent = JSON.stringify({
       tracker: { status: 'starting' },
-      thresholds: options.getCalibration().thresholds,
     }, null, 2);
 
     const isActive = (): boolean => ctx.app.contains(preview);
@@ -70,7 +67,6 @@ export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen
         ctx.app,
         options.face,
         video,
-        options.getCalibration,
         ctx.setAnimationFrame,
       );
     } catch (error) {
@@ -86,7 +82,6 @@ export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen
       readout.textContent = JSON.stringify({
         error: message,
         details,
-        thresholds: options.getCalibration().thresholds,
       }, null, 2);
       logDiagnosticMessage(ctx.app, `${message}${details ? ` (${details})` : ''}`);
       renderActions(true);

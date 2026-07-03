@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_CALIBRATION } from '../../game/core/types';
 import { showCameraCheckScreen } from './camera-check';
 
 const diagnosticSpies = vi.hoisted(() => ({
@@ -94,7 +93,6 @@ describe('showCameraCheckScreen', () => {
 
     await showCameraCheckScreen({
       face: face as unknown as never,
-      getCalibration: () => DEFAULT_CALIBRATION,
       onBack: vi.fn(),
     })({
       app: harness.app,
@@ -112,7 +110,6 @@ describe('showCameraCheckScreen', () => {
     expect(JSON.parse(harness.readout.textContent)).toMatchObject({
       error: 'Camera Check could not start the front camera. Try again.',
       details: 'permission denied',
-      thresholds: DEFAULT_CALIBRATION.thresholds,
     });
     expect(harness.actions.children.map((button) => button.textContent)).toEqual(['Retry', 'Back']);
     expect(diagnosticSpies.startDiagnosticOverlay).not.toHaveBeenCalled();
@@ -134,7 +131,6 @@ describe('showCameraCheckScreen', () => {
 
     await showCameraCheckScreen({
       face: face as unknown as never,
-      getCalibration: () => DEFAULT_CALIBRATION,
       onBack: vi.fn(),
     })({
       app: harness.app,
@@ -155,7 +151,6 @@ describe('showCameraCheckScreen', () => {
       harness.app,
       face,
       video,
-      expect.any(Function),
       harness.setAnimationFrame,
     );
   });

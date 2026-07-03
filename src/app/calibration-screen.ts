@@ -1,5 +1,4 @@
-import type { CalibrationProfile, NormalizedFaceInput } from '../game/core/types';
-import { buildCalibration } from '../game/input/calibration/calibration';
+import type { FaceTriggers } from '../game/core/types';
 import type { FaceInputService } from '../game/input/face/FaceInputService';
 import { drawFaceOverlay, overlayPaths } from './face-overlay';
 import { button } from './ui';
@@ -11,9 +10,6 @@ export interface CalibrationScreenOptions {
 
 export interface CalibrationMount {
   face: FaceInputService;
-  getCalibration: () => CalibrationProfile;
-  setCalibration: (profile: CalibrationProfile) => void;
-  onReset: () => void;
   setRafId: (id: number) => void;
   onPlay: () => void;
   onBack: () => void;
@@ -51,8 +47,8 @@ export function buildCalibrationHtml(
 ): string {
   const title = eventTitle ? `${eventTitle} Calibration` : 'Camera Calibration';
   const helper = eventTitle
-    ? 'Check the camera overlay, then save a neutral face sample before the event starts.'
-    : 'Confirm the camera, facial feature overlay, movement triggers, and calibrated thresholds.';
+    ? 'Check the camera overlay and movement triggers, then continue to the event.'
+    : 'Confirm the camera, facial feature overlay, and live movement triggers.';
 
   return buildDiagnosticHtml({ title, helper, buildCode });
 }
@@ -71,35 +67,14 @@ export function logDiagnosticMessage(root: ParentNode, message: string): void {
   box.textContent = lines.join('\n');
 }
 
-async function captureCalibration(face: FaceInputService): Promise<CalibrationProfile | null> {
-  const samples: NormalizedFaceInput[] = [];
-
-  for (let i = 0; i < 12; i++) {
-    samples.push(face.getInput());
-    await new Promise<void>((resolve) => setTimeout(resolve, 80));
-  }
-
-  const profile = buildCalibration(samples);
-
-  if (!profile) {
-    logDiagnosticMessage(
-      document,
-      'Could not see a face. Try again in bright light with your face centered.',
-    );
-  }
-
-  return profile;
-}
-
 export function startDiagnosticOverlay(
   root: ParentNode,
   face: FaceInputService,
   video: HTMLVideoElement,
-  getCalibration: () => CalibrationProfile,
   setRafId: (id: number) => void,
 ): void {
   let lastStatus = '';
-  let lastTriggers: Record<string, boolean> = {};
+  let lastTriggers: FaceTriggers | null = null;
 
   const draw = () => {
     const preview = root.querySelector<HTMLDivElement>('#preview');
@@ -117,8 +92,7 @@ export function startDiagnosticOverlay(
       return;
     }
 
-    const calibration = getCalibration();
-    const input = face.getInput();
+    const { signals, triggers } = face.getEventInput();
     const frame = face.getDebugFrame();
 
     if (frame.status !== lastStatus) {
@@ -137,35 +111,26 @@ export function startDiagnosticOverlay(
     }
 
     ctx.clearRect(0, 0, width, height);
-    drawFaceOverlay(ctx, frame, input, video, width, height);
+    drawFaceOverlay(ctx, frame, triggers, video, width, height);
 
-    const triggers: Record<string, boolean> = {
-      'face detected': input.facePresent,
-      'left blink': input.leftBlink,
-      'right blink': input.rightBlink,
-      'both eyes closed': input.bothEyesClosed,
-      'eyebrows raised': input.eyebrowsRaised >= calibration.thresholds.eyebrowsRaised,
-      'left eyebrow raised': input.leftEyebrowRaised >= calibration.thresholds.leftEyebrowRaised,
-      'right eyebrow raised': input.rightEyebrowRaised >= calibration.thresholds.rightEyebrowRaised,
-      'mouth open': input.mouthOpen >= calibration.thresholds.mouthOpen,
-      'lips pursed': input.lipsPursed,
-    };
+    for (const key of Object.keys(triggers) as (keyof FaceTriggers)[]) {
+      const active = triggers[key];
+      const wasActive = lastTriggers ? lastTriggers[key] : false;
 
-    for (const [name, active] of Object.entries(triggers)) {
-      if (active && !lastTriggers[name]) {
-        logDiagnosticMessage(root, `> ${name}`);
+      if (active && !wasActive) {
+        logDiagnosticMessage(root, `> ${key}`);
       }
 
-      if (!active && lastTriggers[name]) {
-        logDiagnosticMessage(root, `- ${name} ended`);
+      if (!active && wasActive) {
+        logDiagnosticMessage(root, `- ${key} ended`);
       }
     }
 
     lastTriggers = triggers;
     readout.textContent = JSON.stringify({
       tracker: { status: frame.status, landmarks: frame.landmarks.length },
-      input,
-      thresholds: calibration.thresholds,
+      signals,
+      triggers,
       blendshapes: frame.blendshapes,
     }, null, 2);
 
@@ -179,35 +144,18 @@ export async function mountCalibration(
   options: CalibrationScreenOptions,
   mount: CalibrationMount,
 ): Promise<void> {
-  const { face, getCalibration, setCalibration, onReset, setRafId, onPlay, onBack } = mount;
+  const { face, setRafId, onPlay, onBack } = mount;
   const isEvent = options.mode === 'event';
 
   document.querySelector('#actions')!.append(
-    button(isEvent ? 'Save Calibration + Play' : 'Save Calibration', async () => {
-      const profile = await captureCalibration(face);
-
-      if (!profile) {
-        return;
-      }
-
-      setCalibration(profile);
-
+    button(isEvent ? 'Play' : 'Continue', () => {
       if (isEvent) {
         onPlay();
       } else {
         logDiagnosticMessage(
           document,
-          'Calibration saved. Try blinking, brows, and mouth movements to confirm the trigger console.',
+          'Try blinking, brows, and mouth movements to confirm the trigger console.',
         );
-      }
-    }),
-    button(isEvent ? 'Practice Without Camera' : 'Reset to Defaults', () => {
-      onReset();
-
-      if (isEvent) {
-        onPlay();
-      } else {
-        logDiagnosticMessage(document, 'Default calibration restored.');
       }
     }),
     button('Back', onBack),
@@ -221,6 +169,6 @@ export async function mountCalibration(
   preview.dataset.status = '';
   preview.prepend(video);
 
-  logDiagnosticMessage(document, 'Calibration overlay ready. Move eyes, brows, mouth, and face.');
-  startDiagnosticOverlay(document, face, video, getCalibration, setRafId);
+  logDiagnosticMessage(document, 'Diagnostic overlay ready. Move eyes, brows, mouth, and face.');
+  startDiagnosticOverlay(document, face, video, setRafId);
 }
