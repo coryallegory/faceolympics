@@ -57,6 +57,9 @@ function calibrationScreen(options: CalibrationScreenOptions): Screen {
       onPlay: () => {
         void startCurrentEvent();
       },
+      onRetry: () => {
+        ctx.goTo(calibrationScreen(options));
+      },
       onBack: () => {
         clearCurrentEvent();
         ctx.goTo(options.mode === 'event' ? menuScreen() : titleScreen());
