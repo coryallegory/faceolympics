@@ -14,6 +14,10 @@ export interface FaceDebugFrame {
 
 const mediapipeAssetPath = (path: string): string => new URL(path, document.baseURI).toString();
 
+// Pinned to a specific model version (not "latest") so behavior can't change out from under us,
+// and so the fallback URL below stays valid indefinitely. Verified 200 OK as of writing.
+const PINNED_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+
 // requestVideoFrameCallback is not yet in lib.dom.d.ts
 type VideoWithRVFC = HTMLVideoElement & {
   requestVideoFrameCallback: (cb: VideoFrameRequestCallback) => number;
@@ -71,13 +75,13 @@ export class FaceInputService {
     this.isLoadingLandmarker = true;
     this.debugFrame = { ...this.debugFrame, status: 'loading', message: 'Loading MediaPipe face tracker from local WASM assets…', updatedAt: Date.now() };
     try {
-      this.landmarker = await this.createLandmarker(mediapipeAssetPath('mediapipe/tasks-vision/wasm/'));
+      this.landmarker = await this.createLandmarker(mediapipeAssetPath('mediapipe/tasks-vision/wasm/'), mediapipeAssetPath('mediapipe/models/face_landmarker.task'));
       this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready. Looking for a face…' };
       this.scheduleTick();
     } catch (localError) {
       this.debugFrame = { ...this.debugFrame, updatedAt: Date.now(), status: 'loading', message: `Local MediaPipe assets failed (${this.errorMessage(localError)}). Trying CDN fallback…` };
       try {
-        this.landmarker = await this.createLandmarker('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
+        this.landmarker = await this.createLandmarker('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm', PINNED_MODEL_URL);
         this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready from CDN fallback. Looking for a face…' };
         this.scheduleTick();
       } catch (cdnError) {
@@ -88,11 +92,15 @@ export class FaceInputService {
     }
   }
 
-  private async createLandmarker(wasmRoot: string): Promise<FaceLandmarker> {
+  // wasmRoot: local self-hosted assets on the first attempt, jsdelivr CDN on fallback.
+  // modelAssetPath: local cached copy (see scripts/copy-mediapipe-assets.mjs) on the first
+  // attempt, the pinned CDN URL on fallback. Either half failing (e.g. the model wasn't
+  // cached locally) throws and triggers the full CDN fallback below.
+  private async createLandmarker(wasmRoot: string, modelAssetPath: string): Promise<FaceLandmarker> {
     const fileset = await FilesetResolver.forVisionTasks(wasmRoot);
     return FaceLandmarker.createFromOptions(fileset, {
       baseOptions: {
-        modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task',
+        modelAssetPath,
         delegate: 'GPU',
       },
       runningMode: 'VIDEO',
