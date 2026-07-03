@@ -27,25 +27,13 @@ export function showPlayScreen(options: PlayScreenOptions): Screen {
 
     ctx.render('<main class="screen play"><h2 id="event-title"></h2><section class="arena" id="arena"></section><details><summary>Debug controls</summary><div id="actions"></div><pre class="debug" id="debug"></pre></details><div class="pip" id="pip"><canvas id="pip-canvas"></canvas></div></main>');
 
-    const title = ctx.app.querySelector<HTMLHeadingElement>('#event-title');
-    const arena = ctx.app.querySelector<HTMLElement>('#arena');
-    const details = ctx.app.querySelector<HTMLDetailsElement>('details');
-    const actions = ctx.app.querySelector<HTMLDivElement>('#actions');
-    const debug = ctx.app.querySelector<HTMLPreElement>('#debug');
-    const pipCanvas = ctx.app.querySelector<HTMLCanvasElement>('#pip-canvas');
-    const pip = ctx.app.querySelector<HTMLDivElement>('#pip');
-
-    if (
-      !title ||
-      !arena ||
-      !details ||
-      !actions ||
-      !debug ||
-      !pipCanvas ||
-      !pip
-    ) {
-      return;
-    }
+    const title = ctx.app.querySelector<HTMLHeadingElement>('#event-title')!;
+    const arena = ctx.app.querySelector<HTMLElement>('#arena')!;
+    const details = ctx.app.querySelector<HTMLDetailsElement>('details')!;
+    const actions = ctx.app.querySelector<HTMLDivElement>('#actions')!;
+    const debug = ctx.app.querySelector<HTMLPreElement>('#debug')!;
+    const pipCanvas = ctx.app.querySelector<HTMLCanvasElement>('#pip-canvas')!;
+    const pip = ctx.app.querySelector<HTMLDivElement>('#pip')!;
 
     title.textContent = event.title;
 
