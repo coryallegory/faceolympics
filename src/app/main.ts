@@ -1,113 +1,120 @@
 import '../styles/main.css';
-import { DEFAULT_CALIBRATION, type CalibrationProfile, type FaceOlympicsEvent } from '../game/core/types';
+import type { FaceOlympicsEvent } from '../game/core/types';
 import { eventFactories, eventList } from '../game/events/registry';
-import { FaceInputService } from '../game/input/face/FaceInputService';
-import { medalLabel } from '../game/scoring/medals';
 import { saveResult } from '../game/storage/scores';
-import { buildCalibrationHtml, mountCalibration, type CalibrationScreenOptions } from './calibration-screen';
-import { drawFaceOverlay } from './face-overlay';
+import {
+  buildCalibrationHtml,
+  mountCalibration,
+  type CalibrationScreenOptions,
+} from './calibration-screen';
+import {
+  clearCurrentEvent,
+  getCalibration,
+  getCurrentEvent,
+  getFaceService,
+  resetCalibration,
+  setCalibration,
+  setCurrentEvent,
+} from './app-state';
+import { createNavigation, type Screen } from './navigation';
+import { showMenuScreen } from './screens/menu';
+import { showPlayScreen } from './screens/play';
+import { showResultsScreen } from './screens/results';
+import { showTitleScreen } from './screens/title';
 
-const app = document.querySelector<HTMLDivElement>('#app')!;
-const face = new FaceInputService();
-let current: FaceOlympicsEvent | undefined;
-let calibration: CalibrationProfile = DEFAULT_CALIBRATION;
-let last = 0;
-let activeAnimationFrame = 0;
-const BUILD_CODE = 'CAL-COPY-09';
+const app = document.querySelector<HTMLDivElement>('#app');
 
-function button(label: string, onClick: () => void): HTMLButtonElement {
-  const el = document.createElement('button');
-  el.textContent = label;
-  el.addEventListener('click', onClick);
-  return el;
+if (!app) {
+  throw new Error('Missing #app root');
 }
 
-function render(html: string): void {
-  cancelAnimationFrame(activeAnimationFrame);
-  app.innerHTML = `${html}<aside class="build-stamp" aria-label="Current app build code">${BUILD_CODE}</aside>`;
-}
+const navigation = createNavigation(app);
 
-function title(): void {
-  render('<main class="screen hero"><p class="eyebrow">Camera stays on your device</p><h1>Face Olympics</h1><p>Goofy mini-events controlled by your face.</p><div id="actions"></div></main>');
-  document.querySelector('#actions')!.append(button('Start Playing', menu), button('Camera Calibration', () => showCalibrationScreen({ mode: 'landing-test' })));
-}
-
-function menu(): void {
-  render('<main class="screen simple"><h2>Pick an Event</h2><p>Choose one short face-controlled challenge.</p><div id="events" class="cards"></div><button id="back">Back</button></main>');
-  const wrap = document.querySelector('#events')!;
-  for (const event of eventList) {
-    const card = button(`${event.title}\n${event.description}`, () => void startEvent(event.id));
-    card.className = 'card';
-    wrap.append(card);
-  }
-  document.querySelector('#back')!.addEventListener('click', title);
-}
-
-async function startEvent(eventId: string): Promise<void> {
-  current = eventFactories[eventId]();
-  void face.start(); // no-op if camera already running; game uses default input until ready
-  play();
-}
-
-async function showCalibrationScreen(options: CalibrationScreenOptions): Promise<void> {
-  current = options.eventId ? eventFactories[options.eventId]() : undefined;
-  render(buildCalibrationHtml(options, current?.title, BUILD_CODE));
-  await mountCalibration(options, {
-    face,
-    getCalibration: () => calibration,
-    setCalibration: (profile) => { calibration = profile; },
-    onReset: () => { calibration = DEFAULT_CALIBRATION; },
-    setRafId: (id) => { activeAnimationFrame = id; },
-    onPlay: play,
-    onBack: options.mode === 'event' ? menu : title,
+function titleScreen(): Screen {
+  return showTitleScreen({
+    onStart: () => navigation.goTo(menuScreen()),
+    onCalibration: () => navigation.goTo(calibrationScreen({ mode: 'landing-test' })),
   });
 }
 
-function play(): void {
-  if (!current) return;
-  current.start(calibration);
-  last = performance.now();
-  render(`<main class="screen play"><h2>${current.title}</h2><section class="arena" id="arena"></section><details><summary>Debug controls</summary><div id="actions"></div><pre class="debug" id="debug"></pre></details><div class="pip" id="pip"><canvas id="pip-canvas"></canvas></div></main>`);
-  document.querySelector<HTMLDivElement>('#pip')!.prepend(face.getVideo());
-  document.querySelector('#actions')!.append(
-    button('Blink', () => face.setDebugInput({ bothEyesClosed: true, leftBlink: true, rightBlink: true })),
-    button('Brows Up', () => face.setDebugInput({ eyebrowsRaised: 0.9, leftEyebrowRaised: 0.9, rightEyebrowRaised: 0.9, bothEyesClosed: false })),
-    button('Mouth Open', () => face.setDebugInput({ mouthOpen: 0.9, lipsPursed: false })),
-    button('Release', () => face.setDebugInput({ mouthOpen: 0, lipsPursed: true })),
-    button('Pause / Exit', menu),
-  );
-  activeAnimationFrame = requestAnimationFrame(loop);
+function menuScreen(): Screen {
+  return showMenuScreen({
+    events: eventList,
+    onSelectEvent: (eventId) => {
+      void startEvent(eventId);
+    },
+    onBack: () => navigation.goTo(titleScreen()),
+  });
 }
 
-function loop(now: number): void {
-  if (!current) return;
-  const delta = now - last;
-  last = now;
-  const input = face.getInput();
-  const frame = current.update(delta, input);
-  const mascot = current.id === 'dragon-blast' ? '🐉' : current.id === 'face-weightlifting' ? '🏋️' : '👀';
-  document.querySelector('#arena')!.innerHTML = `<div class="mascot">${mascot}</div><strong>${frame.feedback}</strong><p>Score: ${frame.score}</p>`;
-  document.querySelector('#debug')!.textContent = JSON.stringify({ input, thresholds: calibration.thresholds, state: frame.state }, null, 2);
-  const pipCanvas = document.querySelector<HTMLCanvasElement>('#pip-canvas');
-  const pip = document.querySelector<HTMLDivElement>('#pip');
-  if (pipCanvas && pip) {
-    const w = pip.clientWidth, h = pip.clientHeight;
-    if (pipCanvas.width !== w || pipCanvas.height !== h) { pipCanvas.width = w; pipCanvas.height = h; }
-    const ctx = pipCanvas.getContext('2d');
-    if (ctx) { ctx.clearRect(0, 0, w, h); drawFaceOverlay(ctx, face.getDebugFrame(), input, face.getVideo(), w, h); }
+function calibrationScreen(options: CalibrationScreenOptions): Screen {
+  return async (ctx) => {
+    const next = options.eventId ? eventFactories[options.eventId]() : undefined;
+    setCurrentEvent(next);
+
+    ctx.render(buildCalibrationHtml(options, next?.title, ctx.buildCode));
+
+    await mountCalibration(options, {
+      face: getFaceService(),
+      getCalibration,
+      setCalibration,
+      onReset: resetCalibration,
+      setRafId: ctx.setAnimationFrame,
+      onPlay: () => {
+        void startCurrentEvent();
+      },
+      onBack: () => {
+        clearCurrentEvent();
+        ctx.goTo(options.mode === 'event' ? menuScreen() : titleScreen());
+      },
+    });
+  };
+}
+
+async function startEvent(eventId: string): Promise<void> {
+  const event = eventFactories[eventId]();
+  setCurrentEvent(event);
+  await startEventInstance(event);
+}
+
+async function startCurrentEvent(): Promise<void> {
+  const event = getCurrentEvent();
+
+  if (!event) {
+    return;
   }
-  if (frame.finished) results();
-  else activeAnimationFrame = requestAnimationFrame(loop);
+
+  await startEventInstance(event);
 }
 
-function results(): void {
-  if (!current) return;
-  const result = current.finish();
-  saveResult(result);
-  render(`<main class="screen"><h2>${result.title} Results</h2><div class="medal">${medalLabel(result.medal)}</div><p>${result.summary}</p><p>Score: ${result.score}</p><div id="actions"></div></main>`);
-  document.querySelector('#actions')!.append(button('Retry', () => void startEvent(result.eventId)), button('Event Select', menu));
-  current.dispose();
-  current = undefined;
+async function startEventInstance(event: FaceOlympicsEvent): Promise<void> {
+  await event.init({ now: () => performance.now() });
+  void getFaceService().start();
+  goToPlay(event);
 }
 
-title();
+function goToPlay(event: FaceOlympicsEvent): void {
+  navigation.goTo(showPlayScreen({
+    event,
+    calibration: getCalibration(),
+    face: getFaceService(),
+    onExit: () => {
+      clearCurrentEvent();
+      navigation.goTo(menuScreen());
+    },
+    onFinish: (finishedEvent) => {
+      const result = finishedEvent.finish();
+      saveResult(result);
+      clearCurrentEvent();
+      navigation.goTo(showResultsScreen({
+        result,
+        onRetry: () => {
+          void startEvent(result.eventId);
+        },
+        onEventSelect: () => navigation.goTo(menuScreen()),
+      }));
+    },
+  }));
+}
+
+navigation.goTo(titleScreen());
