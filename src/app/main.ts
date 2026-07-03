@@ -11,9 +11,12 @@ import {
   clearCurrentEvent,
   getCurrentEvent,
   getFaceService,
+  persistTuning,
+  restorePersistedTuning,
   setCurrentEvent,
 } from './app-state';
 import { createNavigation, type Screen } from './navigation';
+import { showCameraCheckScreen } from './screens/camera-check';
 import { showMenuScreen } from './screens/menu';
 import { showPlayScreen } from './screens/play';
 import { showResultsScreen } from './screens/results';
@@ -40,7 +43,18 @@ function menuScreen(): Screen {
     onSelectEvent: (eventId) => {
       void startEvent(eventId);
     },
+    onCameraCheck: () => navigation.goTo(cameraCheckScreen()),
     onBack: () => navigation.goTo(titleScreen()),
+  });
+}
+
+function cameraCheckScreen(): Screen {
+  return showCameraCheckScreen({
+    face: getFaceService(),
+    onBack: () => {
+      persistTuning();
+      navigation.goTo(menuScreen());
+    },
   });
 }
 
@@ -101,6 +115,7 @@ function goToPlay(event: FaceOlympicsEvent): void {
     onFinish: (finishedEvent) => {
       const result = finishedEvent.finish();
       saveResult(result);
+      persistTuning();
       clearCurrentEvent();
       navigation.goTo(showResultsScreen({
         result,
@@ -113,4 +128,5 @@ function goToPlay(event: FaceOlympicsEvent): void {
   }));
 }
 
+restorePersistedTuning();
 navigation.goTo(titleScreen());
