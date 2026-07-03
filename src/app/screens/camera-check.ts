@@ -12,10 +12,6 @@ export interface CameraCheckScreenOptions {
   onBack: () => void;
 }
 
-function cameraStartErrorMessage(): string {
-  return 'Camera Check could not start the front camera. Try again.';
-}
-
 export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen {
   return async (ctx) => {
     ctx.render(buildDiagnosticHtml({
@@ -74,7 +70,10 @@ export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen
         return;
       }
 
-      const message = cameraStartErrorMessage();
+      // FaceInputService.start() sets debugFrame.status = 'error' with a friendly message
+      // before rejecting, so read the shared message from the service instead of maintaining
+      // a second, locally hardcoded copy here.
+      const message = options.face.getDebugFrame().message;
       const details = error instanceof Error ? error.message : String(error);
 
       preview.dataset.status = 'Camera unavailable';

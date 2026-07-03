@@ -42,6 +42,36 @@ function normalizeSigned(range: AdaptiveRange, raw: number, deltaMs: number): nu
   return sign * range.normalize(magnitude, deltaMs);
 }
 
+function rawErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// Maps a start() failure (getUserMedia()/video.play() rejection) to a stable, friendly,
+// user-facing message. Exported and pure (no `this`) so it's independently unit-testable
+// without touching the DOM, and so every caller of start() gets identical copy instead of
+// re-deriving its own — FaceInputService.debugFrame.message is the single source of truth,
+// screens should read it rather than hardcoding their own error string.
+export function cameraStartErrorMessage(error: unknown): string {
+  const name = error instanceof DOMException ? error.name : undefined;
+  switch (name) {
+    case 'NotAllowedError':
+    case 'PermissionDeniedError':
+      return 'Camera access was denied. Allow camera access for this site in your browser settings, then retry.';
+    case 'NotFoundError':
+    case 'DevicesNotFoundError':
+      return 'No camera was found on this device.';
+    case 'NotReadableError':
+    case 'TrackStartError':
+      return 'The camera is already in use by another application. Close other apps or tabs using it, then retry.';
+    case 'OverconstrainedError':
+      return 'No camera on this device meets the required settings.';
+    case 'SecurityError':
+      return "Camera access is blocked by this page's security settings.";
+    default:
+      return `Could not start the front camera (${rawErrorMessage(error)}).`;
+  }
+}
+
 export class FaceInputService {
   private stream?: MediaStream;
   private video = document.createElement('video');
@@ -59,11 +89,16 @@ export class FaceInputService {
 
   async start(): Promise<HTMLVideoElement> {
     if (this.stream) return this.video;
-    this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-    this.video.srcObject = this.stream;
-    this.video.muted = true;
-    this.video.playsInline = true;
-    await this.video.play();
+    try {
+      this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+      this.video.srcObject = this.stream;
+      this.video.muted = true;
+      this.video.playsInline = true;
+      await this.video.play();
+    } catch (error) {
+      this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'error', message: cameraStartErrorMessage(error) };
+      throw error;
+    }
     this.lastTickAt = performance.now();
     const signals: FaceSignals = { ...DEFAULT_SIGNALS, facePresent: true, confidence: 0.6 };
     this.eventInput = { signals, triggers: DEFAULT_TRIGGERS };
@@ -114,13 +149,13 @@ export class FaceInputService {
       this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready. Looking for a face…' };
       this.scheduleTick();
     } catch (localError) {
-      this.debugFrame = { ...this.debugFrame, updatedAt: Date.now(), status: 'loading', message: `Local MediaPipe assets failed (${this.errorMessage(localError)}). Trying CDN fallback…` };
+      this.debugFrame = { ...this.debugFrame, updatedAt: Date.now(), status: 'loading', message: `Local MediaPipe assets failed (${rawErrorMessage(localError)}). Trying CDN fallback…` };
       try {
         this.landmarker = await this.createLandmarker('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm', PINNED_MODEL_URL);
         this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready from CDN fallback. Looking for a face…' };
         this.scheduleTick();
       } catch (cdnError) {
-        this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'error', message: `Face tracker failed. Local: ${this.errorMessage(localError)}; CDN: ${this.errorMessage(cdnError)}` };
+        this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'error', message: `Face tracker failed. Local: ${rawErrorMessage(localError)}; CDN: ${rawErrorMessage(cdnError)}` };
       }
     } finally {
       this.isLoadingLandmarker = false;
@@ -142,10 +177,6 @@ export class FaceInputService {
       numFaces: 1,
       outputFaceBlendshapes: true,
     });
-  }
-
-  private errorMessage(error: unknown): string {
-    return error instanceof Error ? error.message : String(error);
   }
 
   private tick(): void {
