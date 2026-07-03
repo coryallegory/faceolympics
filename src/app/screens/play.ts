@@ -17,6 +17,15 @@ export interface PlayScreenOptions {
   onFinish: (event: FaceOlympicsEvent) => void;
 }
 
+// A hidden/backgrounded tab starves requestAnimationFrame, so the first frame after
+// regaining focus can report a rawDelta of several seconds. Clamping keeps timed events
+// (e.g. Blink-Off) from being force-finished by a single giant tick.
+const MAX_FRAME_DELTA_MS = 100;
+
+export function clampFrameDelta(rawDelta: number): number {
+  return Math.min(rawDelta, MAX_FRAME_DELTA_MS);
+}
+
 export function showPlayScreen(options: PlayScreenOptions): Screen {
   return (ctx) => {
     const { event, calibration, face, onExit, onFinish } = options;
@@ -67,8 +76,9 @@ export function showPlayScreen(options: PlayScreenOptions): Screen {
     const mascotLabel = mascotFor(event.id);
 
     const loop = (now: number): void => {
-      const delta = now - last;
+      const rawDelta = now - last;
       last = now;
+      const delta = clampFrameDelta(rawDelta);
 
       const input = face.getInput();
       const frame = event.update(delta, input);
