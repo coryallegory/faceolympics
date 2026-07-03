@@ -85,11 +85,19 @@ function createScreenHarness() {
 }
 
 describe('showCameraCheckScreen', () => {
-  it('shows a generic retry state when camera start fails', async () => {
+  it('shows the service-provided error message and a retry state when camera start fails', async () => {
     const harness = createScreenHarness();
+    const friendlyMessage = 'Camera access was denied. Allow camera access for this site in your browser settings, then retry.';
     const face = {
       start: vi.fn().mockRejectedValue(new Error('permission denied')),
-    } as unknown as { start: () => Promise<HTMLVideoElement> };
+      getDebugFrame: vi.fn(() => ({
+        landmarks: [],
+        blendshapes: {},
+        updatedAt: 0,
+        status: 'error' as const,
+        message: friendlyMessage,
+      })),
+    } as unknown as { start: () => Promise<HTMLVideoElement>; getDebugFrame: () => unknown };
 
     await showCameraCheckScreen({
       face: face as unknown as never,
@@ -104,11 +112,9 @@ describe('showCameraCheckScreen', () => {
 
     expect(face.start).toHaveBeenCalledTimes(1);
     expect(harness.preview.dataset.status).toBe('Camera unavailable');
-    expect(harness.trackerStatus.textContent).toBe(
-      'ERROR: Camera Check could not start the front camera. Try again.',
-    );
+    expect(harness.trackerStatus.textContent).toBe(`ERROR: ${friendlyMessage}`);
     expect(JSON.parse(harness.readout.textContent)).toMatchObject({
-      error: 'Camera Check could not start the front camera. Try again.',
+      error: friendlyMessage,
       details: 'permission denied',
     });
     expect(harness.actions.children.map((button) => button.textContent)).toEqual(['Retry', 'Back']);
@@ -118,7 +124,7 @@ describe('showCameraCheckScreen', () => {
     expect(harness.goTo).toHaveBeenCalledTimes(1);
     expect(diagnosticSpies.logDiagnosticMessage).toHaveBeenCalledWith(
       harness.app,
-      'Camera Check could not start the front camera. Try again. (permission denied)',
+      `${friendlyMessage} (permission denied)`,
     );
   });
 
@@ -127,7 +133,8 @@ describe('showCameraCheckScreen', () => {
     const video = { nodeName: 'VIDEO' } as unknown as HTMLVideoElement;
     const face = {
       start: vi.fn().mockResolvedValue(video),
-    } as unknown as { start: () => Promise<HTMLVideoElement> };
+      getDebugFrame: vi.fn(),
+    } as unknown as { start: () => Promise<HTMLVideoElement>; getDebugFrame: () => unknown };
 
     await showCameraCheckScreen({
       face: face as unknown as never,
