@@ -80,6 +80,7 @@ export class FaceInputService {
   private debugFrame: FaceDebugFrame = { landmarks: [], blendshapes: {}, updatedAt: 0, status: 'idle', message: 'Camera has not started.' };
   private isLoadingLandmarker = false;
   private lastTickAt = 0;
+  private running = false;
 
   private readonly triggerEngine = new TriggerEngine(DEFAULT_THRESHOLDS);
   private readonly adaptiveBrowLeft = new AdaptiveRange();
@@ -88,7 +89,7 @@ export class FaceInputService {
   private readonly adaptiveGazeY = new AdaptiveRange();
 
   async start(): Promise<HTMLVideoElement> {
-    if (this.stream) return this.video;
+    if (this.running) return this.video;
     try {
       this.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
       this.video.srcObject = this.stream;
@@ -99,11 +100,20 @@ export class FaceInputService {
       this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'error', message: cameraStartErrorMessage(error) };
       throw error;
     }
+    this.running = true;
     this.lastTickAt = performance.now();
     const signals: FaceSignals = { ...DEFAULT_SIGNALS, facePresent: true, confidence: 0.6 };
     this.eventInput = { signals, triggers: DEFAULT_TRIGGERS };
-    this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'loading', message: 'Camera started. Loading MediaPipe face tracker…' };
-    void this.loadLandmarker();
+    if (this.landmarker) {
+      // Landmarker already loaded from a previous start() — resume ticking directly instead
+      // of re-running FilesetResolver/createFromOptions, so a title -> event -> title -> event
+      // round trip doesn't re-pay MediaPipe's load cost.
+      this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'ready', message: 'Face tracker ready. Looking for a face…' };
+      this.scheduleTick();
+    } else {
+      this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'loading', message: 'Camera started. Loading MediaPipe face tracker…' };
+      void this.loadLandmarker();
+    }
     return this.video;
   }
 
@@ -112,9 +122,15 @@ export class FaceInputService {
   getSignals(): FaceSignals { return this.eventInput.signals; }
   getDebugFrame(): FaceDebugFrame { return this.debugFrame; }
 
+  // Releases the camera (tracks + preview) and halts the tick loop, but deliberately keeps
+  // the loaded FaceLandmarker around so a later start() can resume tracking immediately
+  // instead of re-downloading/re-initializing MediaPipe.
   stop(): void {
+    this.running = false;
     this.stream?.getTracks().forEach((track) => track.stop());
     this.stream = undefined;
+    this.video.pause();
+    this.video.srcObject = null;
     const signals: FaceSignals = { ...DEFAULT_SIGNALS, facePresent: false, confidence: 0 };
     this.eventInput = { signals, triggers: DEFAULT_TRIGGERS };
     this.debugFrame = { landmarks: [], blendshapes: {}, updatedAt: Date.now(), status: 'idle', message: 'Camera stopped.' };
@@ -131,8 +147,11 @@ export class FaceInputService {
   }
 
   // Schedules the next detection tick in sync with new video frames where supported,
-  // falling back to RAF on browsers without requestVideoFrameCallback.
+  // falling back to RAF on browsers without requestVideoFrameCallback. No-ops once stop()
+  // has cleared `running`, which is what actually halts the loop (a tick scheduled just
+  // before stop() still checks `running` again when it fires — see tick()).
   private scheduleTick(): void {
+    if (!this.running) return;
     if ('requestVideoFrameCallback' in this.video) {
       (this.video as VideoWithRVFC).requestVideoFrameCallback(() => this.tick());
     } else {
@@ -180,6 +199,7 @@ export class FaceInputService {
   }
 
   private tick(): void {
+    if (!this.running) return;
     const now = performance.now();
     const deltaMs = this.lastTickAt ? now - this.lastTickAt : 0;
     this.lastTickAt = now;
