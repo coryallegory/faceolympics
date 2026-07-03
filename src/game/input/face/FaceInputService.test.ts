@@ -1,27 +1,65 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_THRESHOLDS } from '../../core/types';
 import type { TuningState } from '../../storage/tuning';
-import { AdaptiveRange } from './adaptive-range';
 import { FaceInputService, cameraStartErrorMessage } from './FaceInputService';
 
-type FaceInputServiceInternals = {
-  adaptiveBrowLeft: AdaptiveRange;
-};
-
-function getAdaptiveBrowLeft(service: FaceInputService): AdaptiveRange {
-  return (service as unknown as FaceInputServiceInternals).adaptiveBrowLeft;
-}
-
 function installDocumentStub() {
+  let pendingVideoFrameCallback: VideoFrameRequestCallback | null = null;
+  const video = {
+    pause: vi.fn(),
+    play: vi.fn().mockResolvedValue(undefined),
+    requestVideoFrameCallback: vi.fn((cb: VideoFrameRequestCallback) => {
+      pendingVideoFrameCallback = cb;
+      return 1;
+    }),
+    readyState: 2,
+    srcObject: null,
+    muted: false,
+    playsInline: false,
+  };
   globalThis.document = {
     baseURI: 'https://example.test/',
-    createElement: vi.fn(() => ({
-      pause: vi.fn(),
-      srcObject: null,
-      muted: false,
-      playsInline: false,
-    })),
+    createElement: vi.fn(() => video),
   } as unknown as Document;
+
+  return {
+    video,
+    runPendingFrame() {
+      const callback = pendingVideoFrameCallback;
+      if (!callback) throw new Error('Expected FaceInputService to schedule a video frame callback.');
+      pendingVideoFrameCallback = null;
+      callback(0, {} as VideoFrameCallbackMetadata);
+    },
+  };
+}
+
+async function serviceSignalForSingleFrame(
+  service: FaceInputService,
+  runPendingFrame: () => void,
+): Promise<number> {
+  const fakeStream = { getTracks: () => [] } as unknown as MediaStream;
+  const detectForVideo = vi.fn(() => ({
+    faceBlendshapes: [{
+      categories: [{ categoryName: 'browOuterUpRight', score: 0.35 }],
+    }],
+    faceLandmarks: [[{ x: 0, y: 0, z: 0 }]],
+  }));
+
+  vi.stubGlobal('navigator', {
+    mediaDevices: {
+      getUserMedia: vi.fn().mockResolvedValue(fakeStream),
+    },
+  });
+  Object.defineProperty(service, 'createLandmarker', {
+    value: vi.fn().mockResolvedValue({ detectForVideo }),
+    configurable: true,
+  });
+
+  await service.start();
+  await Promise.resolve();
+  runPendingFrame();
+
+  return service.getEventInput().signals.browRaiseLeft;
 }
 
 afterEach(() => {
@@ -96,13 +134,18 @@ describe('FaceInputService tuning API', () => {
     expect(service.getEventInput().triggers.mouthOpen).toBe(false);
   });
 
-  it('a seeded adaptive range remaps in-range values instead of using cold-start passthrough', () => {
-    installDocumentStub();
+  it('a seeded adaptive range changes the normalized brow signal reported by the service', async () => {
+    const coldDocument = installDocumentStub();
     const coldService = new FaceInputService();
-    const seededService = new FaceInputService();
-    const rawValue = 0.35;
+    const coldSignal = await serviceSignalForSingleFrame(
+      coldService,
+      coldDocument.runPendingFrame,
+    );
 
-    expect(getAdaptiveBrowLeft(coldService).normalize(rawValue, 16)).toBe(rawValue);
+    coldService.stop();
+
+    const seededDocument = installDocumentStub();
+    const seededService = new FaceInputService();
 
     seededService.seedTuning({
       thresholds: { ...DEFAULT_THRESHOLDS },
@@ -113,9 +156,13 @@ describe('FaceInputService tuning API', () => {
         gazeY: { low: 0.1, high: 0.6 },
       },
     });
+    const seededSignal = await serviceSignalForSingleFrame(
+      seededService,
+      seededDocument.runPendingFrame,
+    );
 
-    const normalized = getAdaptiveBrowLeft(seededService).normalize(rawValue, 16);
-    expect(normalized).not.toBe(rawValue);
-    expect(normalized).toBeCloseTo(0.25, 2);
+    expect(coldSignal).toBeCloseTo(0.5475, 4);
+    expect(seededSignal).toBeCloseTo((coldSignal - 0.2) / 0.6, 4);
+    expect(seededSignal).not.toBeCloseTo(coldSignal, 4);
   });
 });
