@@ -61,13 +61,7 @@ function calibrationScreen(options: CalibrationScreenOptions): Screen {
       onReset: resetCalibration,
       setRafId: ctx.setAnimationFrame,
       onPlay: () => {
-        const current = getCurrentEvent();
-
-        if (!current) {
-          return;
-        }
-
-        goToPlay(current);
+        void startCurrentEvent();
       },
       onBack: () => {
         clearCurrentEvent();
@@ -80,6 +74,20 @@ function calibrationScreen(options: CalibrationScreenOptions): Screen {
 async function startEvent(eventId: string): Promise<void> {
   const event = eventFactories[eventId]();
   setCurrentEvent(event);
+  await startEventInstance(event);
+}
+
+async function startCurrentEvent(): Promise<void> {
+  const event = getCurrentEvent();
+
+  if (!event) {
+    return;
+  }
+
+  await startEventInstance(event);
+}
+
+async function startEventInstance(event: FaceOlympicsEvent): Promise<void> {
   await event.init({ now: () => performance.now() });
   void getFaceService().start();
   goToPlay(event);
