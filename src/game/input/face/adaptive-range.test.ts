@@ -14,21 +14,33 @@ describe('AdaptiveRange', () => {
   });
 
   it('normalizes around a learned span once the stream establishes enough range', () => {
-    const range = new AdaptiveRange();
+    const range = new AdaptiveRange({ retuneTimeMs: 5_000 });
 
-    range.normalize(0.2, 1_000);
-    range.normalize(0.8, 1_000);
+    for (let index = 0; index < 6; index += 1) {
+      range.normalize(0.2, 1_000);
+      range.normalize(0.8, 1_000);
+    }
 
-    const midpoint = range.normalize(0.5, 0);
+    const interior = range.normalize(0.35, 0);
     const { low, high } = range.snapshot();
 
     expect(high - low).toBeGreaterThanOrEqual(DEFAULT_MIN_SPAN);
     expect(range.normalize(0.2, 0)).toBe(0);
-    expect(midpoint).toBeCloseTo(0.5, 3);
+    expect(interior).toBeGreaterThan(0);
+    expect(interior).toBeLessThan(1);
     expect(range.normalize(0.8, 0)).toBe(1);
   });
 
-  it('re-converges after the underlying range shifts when time advances', () => {
+  it('does not widen seeded bounds when no time has elapsed', () => {
+    const range = new AdaptiveRange({ retuneTimeMs: 5_000 });
+
+    range.seed(0.2, 0.8);
+    range.normalize(0.95, 0);
+
+    expect(range.snapshot()).toEqual({ low: 0.2, high: 0.8 });
+  });
+
+  it('re-converges after the underlying range shifts only when time advances', () => {
     const frozen = new AdaptiveRange({ retuneTimeMs: 5_000 });
     const retuning = new AdaptiveRange({ retuneTimeMs: 5_000 });
 
@@ -42,10 +54,11 @@ describe('AdaptiveRange', () => {
     }
 
     expect(frozen.snapshot().low).toBeCloseTo(0.2, 5);
+    expect(frozen.snapshot().high).toBeCloseTo(0.8, 5);
     expect(retuning.snapshot().low).toBeGreaterThan(0.45);
-    expect(retuning.snapshot().high).toBeGreaterThanOrEqual(0.95);
+    expect(retuning.snapshot().high).toBeGreaterThan(0.8);
+    expect(retuning.snapshot().high).toBeLessThan(0.95);
     expect(retuning.normalize(0.55, 0)).toBeLessThan(0.2);
-    expect(retuning.normalize(0.95, 0)).toBe(1);
   });
 
   it('respects seeded bounds before live samples arrive', () => {

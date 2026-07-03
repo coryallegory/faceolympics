@@ -62,8 +62,12 @@ export class AdaptiveRange {
 
     const alpha = this.decayFactor(deltaMs);
     const nextMean = this.mean + (value - this.mean) * alpha;
-    const nextLow = value < this.low ? value : this.low + (nextMean - this.low) * alpha;
-    const nextHigh = value > this.high ? value : this.high + (nextMean - this.high) * alpha;
+    const nextLow = value < this.low
+      ? this.low + (value - this.low) * alpha
+      : this.low + (nextMean - this.low) * alpha;
+    const nextHigh = value > this.high
+      ? this.high + (value - this.high) * alpha
+      : this.high + (nextMean - this.high) * alpha;
 
     this.mean = nextMean;
     this.low = Math.min(nextLow, nextHigh);
