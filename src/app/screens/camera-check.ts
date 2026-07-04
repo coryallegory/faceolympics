@@ -1,3 +1,5 @@
+import type { FaceTriggers } from '../../game/core/types';
+import { drawFaceOverlay } from '../face-overlay';
 import type { FaceInputService } from '../../game/input/face/FaceInputService';
 import {
   buildDiagnosticHtml,
@@ -10,6 +12,148 @@ import { button } from '../ui';
 export interface CameraCheckScreenOptions {
   face: FaceInputService;
   onBack: () => void;
+}
+
+const TRIGGER_KEYS: readonly (keyof FaceTriggers)[] = [
+  'blinkLeft',
+  'blinkRight',
+  'bothEyesClosed',
+  'mouthOpen',
+  'lipsPursed',
+  'browsRaised',
+  'browLeftRaised',
+  'browRightRaised',
+  'lookLeft',
+  'lookRight',
+  'lookUp',
+  'lookDown',
+];
+
+function ensureBlendshapeDetails(root: ParentNode): {
+  details: HTMLDetailsElement;
+  readout: HTMLPreElement;
+} | null {
+  const existingDetails = root.querySelector<HTMLDetailsElement>('#blendshape-details');
+  const existingReadout = root.querySelector<HTMLPreElement>('#blendshape-readout');
+
+  if (existingDetails && existingReadout) {
+    return { details: existingDetails, readout: existingReadout };
+  }
+
+  const readout = root.querySelector<HTMLPreElement>('#readout');
+  const panel = readout?.parentElement;
+
+  if (!readout || !panel) {
+    return null;
+  }
+
+  const details = document.createElement('details');
+  details.id = 'blendshape-details';
+
+  const summary = document.createElement('summary');
+  summary.textContent = 'Blendshapes';
+
+  const blendshapeReadout = document.createElement('pre');
+  blendshapeReadout.id = 'blendshape-readout';
+  blendshapeReadout.className = 'debug';
+  blendshapeReadout.textContent = '{}';
+
+  details.append(summary, blendshapeReadout);
+  panel.append(details);
+
+  return {
+    details,
+    readout: blendshapeReadout,
+  };
+}
+
+function supportsNewCameraCheckModel(face: FaceInputService): boolean {
+  const candidate = face as Partial<FaceInputService>;
+  return (
+    typeof candidate.getEventInput === 'function'
+    && typeof candidate.getTuningSnapshot === 'function'
+  );
+}
+
+function startCameraCheckOverlay(
+  root: ParentNode,
+  face: FaceInputService,
+  video: HTMLVideoElement,
+  setAnimationFrame: (id: number) => void,
+): void {
+  const blendshapeDetails = ensureBlendshapeDetails(root);
+
+  if (!blendshapeDetails) {
+    return;
+  }
+
+  const draw = () => {
+    const preview = root.querySelector<HTMLDivElement>('#preview');
+    const canvas = root.querySelector<HTMLCanvasElement>('#face-overlay');
+    const readout = root.querySelector<HTMLPreElement>('#readout');
+    const trackerStatus = root.querySelector<HTMLParagraphElement>('#tracker-status');
+    const triggerConsole = root.querySelector<HTMLPreElement>('#trigger-console');
+
+    if (!preview || !canvas || !readout || !trackerStatus || !triggerConsole) {
+      return;
+    }
+
+    const overlay = canvas.getContext('2d');
+
+    if (!overlay) {
+      return;
+    }
+
+    const eventInput = face.getEventInput();
+    const tuning = face.getTuningSnapshot();
+    const frame = face.getDebugFrame();
+
+    trackerStatus.textContent = `${frame.status.toUpperCase()}: ${frame.message}`;
+
+    const width = preview.clientWidth;
+    const height = preview.clientHeight;
+
+    if (canvas.width !== width || canvas.height !== height) {
+      canvas.width = width;
+      canvas.height = height;
+    }
+
+    overlay.clearRect(0, 0, width, height);
+    drawFaceOverlay(
+      overlay,
+      frame,
+      eventInput.triggers,
+      video,
+      width,
+      height,
+    );
+
+    triggerConsole.textContent = JSON.stringify(
+      Object.fromEntries(
+        TRIGGER_KEYS.map((key) => [key, eventInput.triggers[key]]),
+      ),
+      null,
+      2,
+    );
+
+    readout.textContent = JSON.stringify(
+      {
+        signals: eventInput.signals,
+        thresholds: tuning.thresholds,
+        adaptive: tuning.adaptive,
+      },
+      null,
+      2,
+    );
+
+    if (blendshapeDetails.details.open) {
+      blendshapeDetails.readout.textContent = JSON.stringify(frame.blendshapes, null, 2);
+    }
+
+    setAnimationFrame(requestAnimationFrame(draw));
+  };
+
+  setAnimationFrame(requestAnimationFrame(draw));
 }
 
 export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen {
@@ -59,12 +203,16 @@ export function showCameraCheckScreen(options: CameraCheckScreenOptions): Screen
       preview.dataset.status = '';
       preview.prepend(video);
       logDiagnosticMessage(ctx.app, 'Camera Check ready. Move eyes, brows, mouth, and face.');
-      startDiagnosticOverlay(
-        ctx.app,
-        options.face,
-        video,
-        ctx.setAnimationFrame,
-      );
+      if (supportsNewCameraCheckModel(options.face)) {
+        startCameraCheckOverlay(ctx.app, options.face, video, ctx.setAnimationFrame);
+      } else {
+        startDiagnosticOverlay(
+          ctx.app,
+          options.face,
+          video,
+          ctx.setAnimationFrame,
+        );
+      }
     } catch (error) {
       if (!isActive()) {
         return;
