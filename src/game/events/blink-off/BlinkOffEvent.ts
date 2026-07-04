@@ -4,7 +4,6 @@ import type {
   EventInput,
   EventResult,
   FaceOlympicsEvent,
-  NormalizedFaceInput,
 } from '../../core/types';
 import { medalForScore } from '../../scoring/medals';
 import { blinkOffConfig } from './blink-off.config';
@@ -27,13 +26,8 @@ export class BlinkOffEvent implements FaceOlympicsEvent {
     this.finished = false;
   }
 
-  // The parameter stays widened to `NormalizedFaceInput | EventInput` so this class
-  // remains structurally assignable to FaceOlympicsEvent.update(deltaMs,
-  // NormalizedFaceInput) -- that interface (src/game/core/types.ts) can't drop the
-  // deprecated shape until P0.3 removes it. Every real caller (play.ts, events.test.ts)
-  // passes an actual EventInput; narrow to it immediately and read triggers/signals only.
-  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
-    const { signals, triggers } = rawInput as EventInput;
+  update(deltaMs: number, input: EventInput): EventFrameResult {
+    const { signals, triggers } = input;
 
     if (this.finished) {
       return this.frame('Done!');
