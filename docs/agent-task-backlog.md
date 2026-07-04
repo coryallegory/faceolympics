@@ -35,8 +35,10 @@ their listed dependencies have merged.
 - One task = one branch = one PR, titled with the task ID (e.g. `P0.2: extract screen modules`).
 - Before opening the PR run: `npm run typecheck`, `npm run test`, `npm run lint` — all green.
 - Touch only files inside your task's track ownership (see matrix below) plus files the task
-  explicitly lists. If you believe you must edit another track's files, stop and flag it in the
-  PR description instead of doing it.
+  explicitly lists. When a task's Verify section requires automated tests, the task also owns the
+  colocated `*.test.ts` file(s) for the listed modules unless the task explicitly says otherwise.
+  If you believe you must edit another track's files, stop and flag it in the PR description
+  instead of doing it.
 - `src/game/core/types.ts` is a **contract file**: only Phase 0 tasks may change it. Everything
   else consumes it read-only.
 - Camera/MediaPipe behavior cannot run in unit tests. Correctness for input code is established
@@ -73,6 +75,9 @@ their listed dependencies have merged.
 - **Merge authority.** The repo owner merges Phase −1/0 PRs personally. Wave-task PRs may be
   merged by the PM only when CI is green, a review pass found no correctness issues, and no
   `needs-human-check` label is pending (and only if the owner has granted merge authority).
+- **External prerequisites.** Some tasks also depend on non-code inputs such as an owner-supplied
+  fixture. Treat those as gating prerequisites the same way you treat a merged dependency: do not
+  claim the task until the prerequisite is present or explicitly approved in the issue thread.
 - **Escalation.** If completing a task appears to require editing another track's files or
   changing `src/game/core/types.ts`, the agent stops and reports in the PR/issue; the PM
   escalates to the repo owner rather than improvising a contract change.
@@ -192,19 +197,36 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
 
 ### P0.3 (P2). Remove deprecated legacy-input members from `types.ts`
 
-- **Files:** `src/game/core/types.ts` only.
+- **Files:** `src/game/core/types.ts`, plus a narrow, mechanical call-site update in
+  `src/game/events/registry.ts` and the four event classes (`blink-off/BlinkOffEvent.ts`,
+  `dragon-blast/DragonBlastEvent.ts`, `face-weightlifting/FaceWeightliftingEvent.ts`,
+  `look-out/LookOutEvent.ts`) — scope widened after a first P0.3 attempt found the deletion
+  can't land as originally scoped; see issue #57 for the analysis. This mirrors the precedent
+  already set (and owner-ratified) in A4's own PR review for forced, non-design-decision
+  call-site fixes that are a direct consequence of a contract change.
 - **Problem:** A4 introduced the new signals/triggers pipeline but, to stay unblocked, deferred
   deleting the deprecated `NormalizedFaceInput`, `CalibrationProfile`, `DEFAULT_INPUT`,
-  `DEFAULT_CALIBRATION` exports — they were still referenced (`play.ts`'s temporary bridge, and
-  the three event classes' `start(calibration)` signature) at the time A4 merged. Leaving them
-  in place indefinitely is tech debt in a contract file.
-- **Change:** delete the four deprecated exports and their `@deprecated` jsdoc. Before deleting,
-  grep the repo for any remaining references — there should be none once B2 and D1 have merged;
-  if any remain, stop and flag rather than deleting a still-used type (that means one of B2/D1
-  didn't fully migrate).
-- **Depends:** A4, B2, D1 (all three — D1 removes the last consumer of `CalibrationProfile` via
-  `event.start()`; B2 is the doc's original sequencing choice, confirm no residual references
-  before deleting).
+  `DEFAULT_CALIBRATION` exports — they were still referenced at the time A4 merged. D1 migrated
+  event *behavior* to signals/triggers and `start(): void`, but D1's ownership excludes
+  `types.ts`, so `FaceOlympicsEvent` itself still declares the deprecated signatures
+  (`start(calibration: CalibrationProfile)`, `update(deltaMs, input: NormalizedFaceInput)`) and
+  the four event classes + `registry.ts` still carry `NormalizedFaceInput | EventInput` union
+  parameter types as a "type-level seam until P0.3." Deleting the four exports as originally
+  scoped (`types.ts` only) breaks typecheck, since those imports and the interface itself still
+  reference them.
+- **Change:**
+  1. In `types.ts`: retarget `FaceOlympicsEvent.start` to `start(): void` and `.update` to
+     `update(deltaMs: number, input: EventInput): EventFrameResult`; drop `FaceOlympicsEventV2`
+     if it becomes redundant once the base interface matches it; delete the four deprecated
+     exports and their `@deprecated` jsdoc.
+  2. In `registry.ts` and the four event classes: drop the now-unused `NormalizedFaceInput`
+     import and narrow `update(deltaMs, rawInput: NormalizedFaceInput | EventInput)` to
+     `update(deltaMs, input: EventInput)`. Purely mechanical — no behavior change, since D1
+     already made `EventInput` the only input actually consumed.
+  - Before deleting, `git grep` the repo for the four names outside `types.ts`; after your own
+    edits above this should return nothing. If something else still references them, stop and
+    flag instead of forcing it through — that would mean a different file also needs updating.
+- **Depends:** A4, B2, D1 (all three, merged).
 - **Verify:** typecheck/test/lint green; `git grep` for the four removed names outside `types.ts`
   returns nothing.
 
@@ -325,13 +347,15 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
 - **Files:** `FaceInputService.ts`, `brow-metrics.ts`.
 - **Change:** enable `outputFacialTransformationMatrixes`, derive pitch, and correct the
   brow–eye gap in `browLiftFromGeometry` for head pitch so nodding doesn't read as brow motion.
-  Only worth doing if manual testing shows pitch artifacts after A3 lands.
+  Only worth doing if manual testing shows pitch artifacts after A3 lands. Do not claim this task
+  until a linked issue/PR comment documents that artifact; otherwise leave it unstarted.
 - **Depends:** A4.
 
 ### A9 (P1). Expose tuning seed/snapshot API on `FaceInputService`
 
 - **Files:** `src/game/input/face/FaceInputService.ts`, and `trigger-engine.ts` only if a
-  thresholds setter turns out to be the cleaner option there (see Change).
+  thresholds setter turns out to be the cleaner option there (see Change), plus
+  `src/game/input/face/FaceInputService.test.ts` for the required unit coverage.
 - **Problem:** B2 needs to seed persisted tuning (a `TuningState` from C3's `loadTuning()`) into
   the running `FaceInputService` on boot, and read the current tuning back out to persist on
   results / when leaving Camera Check. Today the service's four `AdaptiveRange` fields
@@ -349,7 +373,9 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
   - `getTuningSnapshot(): TuningState` — reads `{low, high}` back from each `AdaptiveRange`'s
     existing `snapshot()` method, plus the currently-active `TriggerThresholds` (store whatever
     thresholds were last applied in a field, since `TriggerEngine` doesn't expose them back out).
-- **Depends:** A4 (merged). **Blocks:** B2.
+- **Depends:** A4 (merged). **Blocks:** B2, B4.
+- **Test ownership note:** the required unit coverage for this task lives in
+  `src/game/input/face/FaceInputService.test.ts`; editing that test file is in scope for A9.
 - **Verify:** unit test — `seedTuning()` followed by `getTuningSnapshot()` round-trips the
   per-channel low/high and thresholds; a freshly seeded `AdaptiveRange` channel no longer
   behaves as cold-start for a value inside the seeded span (i.e. `normalize()` remaps it instead
@@ -404,8 +430,10 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
 - **Files:** `camera-check.ts`.
 - **Change:** console lists exactly the `FaceTriggers` keys; readout shows
   `{ signals, thresholds, adaptive: {low, high} per channel }` instead of the old
-  input/thresholds/blendshapes dump (keep blendshapes behind the existing details toggle).
-- **Depends:** B1, A4.
+  input/thresholds/blendshapes dump (keep blendshapes behind the existing details toggle). Read
+  thresholds/adaptive snapshots from A9's `getTuningSnapshot()` rather than reaching into service
+  internals.
+- **Depends:** B1, A4, A9.
 
 ---
 
@@ -540,7 +568,9 @@ Priorities: **P1** correctness, **P2** robustness/quality, **P3** polish.
   `context.grantPermissions(['camera'])`.
 - **Constraint:** the fixture clip must be supplied or approved by the repo owner (their own
   face or a synthetic one — do NOT download a stranger's face). Keep it small (< 2 MB, 320×240);
-  note in the PR if Git LFS seems warranted.
+  note in the PR if Git LFS seems warranted. Do not start this task until the fixture is present
+  in-repo at `e2e/fixtures/face.y4m` or the owner has explicitly approved an equivalent fixture
+  source in the issue thread.
 - **Depends:** D4, E1, owner-supplied fixture. **Payoff:** clears the `needs-human-check` label
   from most subsequent PRs' basic camera verification.
 
@@ -616,6 +646,10 @@ Wave 2:         A1+A2+A3 ─▶ A4 ─▶ { A5*, A6, B2 (also needs C3), B4, D1 
 Wave 3:         B2 ─▶ B3 ;  D1 ─▶ D2, D6 ;  F2, A8 anytime after deps
 *A5 shares camera-check.ts with B1/B4 — same agent or sequence within Track B's queue.
 ```
+
+Schedule correction: `A9` now sits between `A4` and both `B2`/`B4`; `B2` still also needs `C3`.
+`A8` remains conditional and should stay unclaimed until the pitch artifact has been observed and
+documented in an issue or PR comment.
 
 ## Manual smoke test (referenced by tasks)
 
