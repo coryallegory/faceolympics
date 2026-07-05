@@ -1,10 +1,9 @@
 import type {
-  CalibrationProfile,
   EventFrameResult,
+  EventInput,
   EventResult,
   FaceInputPrimitive,
   FaceOlympicsEvent,
-  NormalizedFaceInput,
 } from '../core/types';
 import { BlinkOffEvent } from './blink-off/BlinkOffEvent';
 import { DragonBlastEvent } from './dragon-blast/DragonBlastEvent';
@@ -41,8 +40,8 @@ function metadataEntry(
     description,
     requiredInputs,
     init: (): void => notPlayable(id),
-    start: (_calibration: CalibrationProfile): void => notPlayable(id),
-    update: (_deltaMs: number, _input: NormalizedFaceInput): EventFrameResult => notPlayable(id),
+    start: (): void => notPlayable(id),
+    update: (_deltaMs: number, _input: EventInput): EventFrameResult => notPlayable(id),
     pause: (): void => notPlayable(id),
     resume: (): void => notPlayable(id),
     finish: (): EventResult => notPlayable(id),

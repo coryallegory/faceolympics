@@ -4,7 +4,6 @@ import type {
   EventInput,
   EventResult,
   FaceOlympicsEvent,
-  NormalizedFaceInput,
 } from '../../core/types';
 import { medalForScore } from '../../scoring/medals';
 import { lookOutConfig } from './look-out.config';
@@ -46,10 +45,8 @@ export class LookOutEvent implements FaceOlympicsEvent {
     this.wasLookingRight = false;
   }
 
-  // See BlinkOffEvent.update for why the parameter is still widened to include the
-  // deprecated NormalizedFaceInput shape -- purely a type-level seam until P0.3.
-  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
-    const { triggers } = rawInput as EventInput;
+  update(deltaMs: number, input: EventInput): EventFrameResult {
+    const { triggers } = input;
 
     if (this.finished) {
       return this.frame('Done!');

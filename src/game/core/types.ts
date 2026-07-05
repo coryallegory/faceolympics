@@ -102,45 +102,6 @@ export const DEFAULT_EVENT_INPUT: EventInput = {
   triggers: DEFAULT_TRIGGERS,
 };
 
-/**
- * @deprecated remove in A4/B2
- */
-export interface NormalizedFaceInput {
-  facePresent: boolean;
-  confidence: number;
-  bothEyesClosed: boolean;
-  leftBlink: boolean;
-  rightBlink: boolean;
-  mouthOpen: number;
-  lipsPursed: boolean;
-  eyebrowsRaised: number;
-  leftEyebrowRaised: number;
-  rightEyebrowRaised: number;
-  headRoll: number;
-}
-
-/**
- * @deprecated remove in A4/B2
- */
-export interface CalibrationProfile {
-  neutral: {
-    mouthOpen: number;
-    eyebrowsRaised: number;
-    leftEyebrowRaised: number;
-    rightEyebrowRaised: number;
-  };
-  thresholds: {
-    blinkClosed: number;
-    eyebrowsRaised: number;
-    leftEyebrowRaised: number;
-    rightEyebrowRaised: number;
-    mouthOpen: number;
-    lipsPursed: number;
-  };
-  confidence: number;
-  createdAt: number;
-}
-
 export interface EventContext {
   now: () => number;
 }
@@ -166,54 +127,10 @@ export interface FaceOlympicsEvent {
   description: string;
   requiredInputs: readonly FaceInputPrimitive[];
   init(context: EventContext): void | Promise<void>;
-  start(calibration: CalibrationProfile): void;
-  update(deltaMs: number, input: NormalizedFaceInput): EventFrameResult;
+  start(): void;
+  update(deltaMs: number, input: EventInput): EventFrameResult;
   pause(): void;
   resume(): void;
   finish(): EventResult;
   dispose(): void;
 }
-
-export interface FaceOlympicsEventV2
-  extends Omit<FaceOlympicsEvent, 'update'> {
-  update(deltaMs: number, input: EventInput): EventFrameResult;
-}
-
-/**
- * @deprecated remove in A4/B2
- */
-export const DEFAULT_INPUT: NormalizedFaceInput = {
-  facePresent: true,
-  confidence: 1,
-  bothEyesClosed: false,
-  leftBlink: false,
-  rightBlink: false,
-  mouthOpen: 0,
-  lipsPursed: false,
-  eyebrowsRaised: 0,
-  leftEyebrowRaised: 0,
-  rightEyebrowRaised: 0,
-  headRoll: 0,
-};
-
-/**
- * @deprecated remove in A4/B2
- */
-export const DEFAULT_CALIBRATION: CalibrationProfile = {
-  neutral: {
-    mouthOpen: 0.15,
-    eyebrowsRaised: 0.2,
-    leftEyebrowRaised: 0.2,
-    rightEyebrowRaised: 0.2,
-  },
-  thresholds: {
-    blinkClosed: 0.65,
-    eyebrowsRaised: 0.55,
-    leftEyebrowRaised: 0.55,
-    rightEyebrowRaised: 0.55,
-    mouthOpen: 0.5,
-    lipsPursed: 0.65,
-  },
-  confidence: 0.85,
-  createdAt: Date.now(),
-};

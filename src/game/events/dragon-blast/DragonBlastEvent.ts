@@ -4,7 +4,6 @@ import type {
   EventInput,
   EventResult,
   FaceOlympicsEvent,
-  NormalizedFaceInput,
 } from '../../core/types';
 import { medalForScore } from '../../scoring/medals';
 import { dragonBlastConfig } from './dragon-blast.config';
@@ -31,10 +30,8 @@ export class DragonBlastEvent implements FaceOlympicsEvent {
     this.finished = false;
   }
 
-  // See BlinkOffEvent.update for why the parameter is still widened to include the
-  // deprecated NormalizedFaceInput shape -- purely a type-level seam until P0.3.
-  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
-    const { triggers } = rawInput as EventInput;
+  update(deltaMs: number, input: EventInput): EventFrameResult {
+    const { triggers } = input;
 
     this.elapsed += deltaMs;
 

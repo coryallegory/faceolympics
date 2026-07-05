@@ -4,7 +4,6 @@ import type {
   EventInput,
   EventResult,
   FaceOlympicsEvent,
-  NormalizedFaceInput,
 } from '../../core/types';
 import { medalForScore } from '../../scoring/medals';
 import { faceWeightliftingConfig } from './face-weightlifting.config';
@@ -29,12 +28,10 @@ export class FaceWeightliftingEvent implements FaceOlympicsEvent {
     this.finished = false;
   }
 
-  // See BlinkOffEvent.update for why the parameter is still widened to include the
-  // deprecated NormalizedFaceInput shape -- purely a type-level seam until P0.3. The
-  // brow-raise trigger is computed centrally (hysteresis + adaptive normalization), so
-  // this event no longer tracks its own eyebrow threshold.
-  update(deltaMs: number, rawInput: NormalizedFaceInput | EventInput): EventFrameResult {
-    const { triggers } = rawInput as EventInput;
+  // The brow-raise trigger is computed centrally (hysteresis + adaptive normalization),
+  // so this event no longer tracks its own eyebrow threshold.
+  update(deltaMs: number, input: EventInput): EventFrameResult {
+    const { triggers } = input;
 
     this.elapsed += deltaMs;
 
